@@ -50,4 +50,52 @@ Android系统涵盖的范围很广，从上层的应用程序，到Framework，�
 
 ## 三、用什么工具来阅读
 
-Android 源码阅读神器当然是Source Insight ，下载地址 http://download.csdn.net/download/foxlee1991/9882553 ，我还专门配置了一个跟Android Studio一样的Darcula主题，下载地址 http://download.csdn.net/download/foxlee1991/9882535
+Android 源码阅读神器当然是Source Insight 
+![](https://user-images.githubusercontent.com/7986735/31375054-e5dba386-add2-11e7-80e0-aa518b10c648.gif)
+
+Source Insight的好处：
+
+* 支持方法跳转，类跳转，并且对C++支持很好
+* 支持文件搜索，java,c++，xml都支持，并且支持内容搜索
+* 支持一键导入，随时配置路径
+* 而且最重要的，无论文件有多少，一点都不卡！
+
+下面我讲讲如何使用Source Insight
+#### 1、下载安装Source Insight
+
+下载地址 http://download.csdn.net/download/foxlee1991/9882553 ，我还专门配置了一个跟Android Studio一样的Darcula主题，下载地址 http://download.csdn.net/download/foxlee1991/9882535
+
+#### 2、导入AOSP源码
+
+我目前还没有下载完整的AOSP源码，只是先下载了几个重要的源码。打开Source Insight,选择Project -> New Project，取个名字比如叫AOSP，点击OK
+
+![](http://upload-images.jianshu.io/upload_images/3387045-8412a62d1b79a699.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+选择你要查看的源码目录，点击OK
+
+![](http://upload-images.jianshu.io/upload_images/3387045-c901bed5d8670ddb.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+选择需要将哪些目录下的源码导入，点击Add Tree
+
+![](http://upload-images.jianshu.io/upload_images/3387045-5033e5e91f286fa5.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+导入成功后会有很多文件列在下方，点击Close
+
+![](http://upload-images.jianshu.io/upload_images/3387045-cf873591e37eadb3.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+
+#### 3、查看源码
+现在进入项目还是一片空白，需要把工具栏打开，然后就可以看源码了
+
+![](http://upload-images.jianshu.io/upload_images/3387045-c80e01b4511ba549.gif?imageMogr2/auto-orient/strip)
+
+左边是方法和成员变量搜索，右边Project File是搜索类名，Project Symbol是内容搜索
+
+![](http://upload-images.jianshu.io/upload_images/3387045-0a23a2fc65603414.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+
+还有一些快捷键，比如Ctrl+左键可以方法跳转，左上角有前进和后退，Ctrl+G 是跳转到指定行，Ctrl+F 搜索内容
+
+如果你习惯用Android Studio来看源码也是可以的，但是它有两个弊端，一是对C++代码支持不太好，二是如果源码太多会很卡。
+
+所以我这里会把我阅读的一些源码拷贝到本项目中，保持原有目录结构，源码量不会太多，应该还好。
