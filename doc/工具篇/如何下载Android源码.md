@@ -1,3 +1,14 @@
+
+>关于我
+
+- foxleezh
+- [我的博客](http://foxleezh.me)
+- [github](https://github.com/foxleezh/)
+- [掘金](https://juejin.im/user/57406ad279df540060555258)
+- [简书](http://www.jianshu.com/users/b1eec1cd9bfd)
+- [邮箱-foxleezh@gmail.com](foxleezh@gmail.com)
+
+
 ## 前言
 源码下载是我们分析源码的开始，Android源码可以全量下载，也可以单个下载，我们先介绍全量下载
 ## 全量下载

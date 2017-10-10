@@ -1,3 +1,13 @@
+>关于我
+
+- foxleezh
+- [我的博客](http://foxleezh.me)
+- [github](https://github.com/foxleezh/)
+- [掘金](https://juejin.im/user/57406ad279df540060555258)
+- [简书](http://www.jianshu.com/users/b1eec1cd9bfd)
+- [邮箱-foxleezh@gmail.com](foxleezh@gmail.com)
+
+
 ## 前言
 当我们把源码下载下来之后，会感到茫然无措，因为AOSP的源码实在是太多了，这里我们需要明确一些问题：
 
