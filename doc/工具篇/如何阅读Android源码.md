@@ -1,13 +1,3 @@
->关于我
-
-- foxleezh
-- [我的博客](http://foxleezh.me)
-- [github](https://github.com/foxleezh/)
-- [掘金](https://juejin.im/user/57406ad279df540060555258)
-- [简书](http://www.jianshu.com/users/b1eec1cd9bfd)
-- [邮箱-foxleezh@gmail.com](foxleezh@gmail.com)
-
-
 ## 前言
 当我们把源码下载下来之后，会感到茫然无措，因为AOSP的源码实在是太多了，这里我们需要明确一些问题：
 
@@ -81,13 +71,16 @@ Source Insight的好处：
 
 ![](http://upload-images.jianshu.io/upload_images/3387045-8412a62d1b79a699.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
 
-选择你要查看的源码目录，点击OK
 
+选择你要查看的源码目录，点击OK
 ![](http://upload-images.jianshu.io/upload_images/3387045-c901bed5d8670ddb.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
 
 选择需要将哪些目录下的源码导入，点击Add Tree
 
+
 ![](http://upload-images.jianshu.io/upload_images/3387045-5033e5e91f286fa5.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
 
 导入成功后会有很多文件列在下方，点击Close
 
@@ -98,6 +91,7 @@ Source Insight的好处：
 现在进入项目还是一片空白，需要把工具栏打开，然后就可以看源码了
 
 ![](http://upload-images.jianshu.io/upload_images/3387045-c80e01b4511ba549.gif?imageMogr2/auto-orient/strip)
+
 
 左边是方法和成员变量搜索，右边Project File是搜索类名，Project Symbol是内容搜索
 

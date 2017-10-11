@@ -1,14 +1,3 @@
-
->关于我
-
-- foxleezh
-- [我的博客](http://foxleezh.me)
-- [github](https://github.com/foxleezh/)
-- [掘金](https://juejin.im/user/57406ad279df540060555258)
-- [简书](http://www.jianshu.com/users/b1eec1cd9bfd)
-- [邮箱-foxleezh@gmail.com](foxleezh@gmail.com)
-
-
 ## 前言
 源码下载是我们分析源码的开始，Android源码可以全量下载，也可以单个下载，我们先介绍全量下载
 ## 全量下载
@@ -23,4 +12,8 @@
 
 镜像地址 https://aosp.tuna.tsinghua.edu.cn/ ，比如我们要下载platform/frameworks/base/目录，就用git clone https://aosp.tuna.tsinghua.edu.cn/platform/frameworks/base ，如果你带宽够的话，一般几分钟就可以下载好你想要的单个源码了。
 
-如果你想下载单个文件，或者搜索文件名及代码，可以访问 http://androidxref.com/ ，这里有部分Android的源码，如果你想看Linux Kernel的源码，这里也是可以的
+如果你想下载单个文件，或者搜索文件名及代码，可以访问 http://androidxref.com/ ，这里有部分Android的源码
+
+如果你想看Linux Kernel的源码，可以访问 https://www.kernel.org/ ，不过我还是推荐在 https://android.googlesource.com/ 下载，对应目录是https://android.googlesource.com/kernel/msm ，也可以用镜像
+
+另外AOSP中引入了很多C++标准库的代码，这个也需要去下载下，下载地址 https://www.gnu.org/software/libc/sources.html ，也可以直接 git clone git://sourceware.org/git/glibc.git
