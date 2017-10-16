@@ -21,7 +21,7 @@
 - Android虚拟机ART运行机制，类加载机制，Java注解，Java反射，这将列入虚拟机篇
 - Android对于Java集合的优化算法，这将列入Java基础篇
 
-我将持续更新本项目，尽可能地为大家提供透彻的Android源码分析
+我将持续更新本项目，尽可能地为大家提供透彻的Android源码分析，每篇文章我会挂在issue上，方便大家探讨并提出问题
 ## 一、工具篇
 - [如何下载Android源码](https://github.com/foxleezh/AOSP/issues/1)<br>
 - [如何阅读Android源码](https://github.com/foxleezh/AOSP/issues/2)<br>
