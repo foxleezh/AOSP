@@ -25,3 +25,6 @@
 ## 一、工具篇
 - [如何下载Android源码](https://github.com/foxleezh/AOSP/issues/1)<br>
 - [如何阅读Android源码](https://github.com/foxleezh/AOSP/issues/2)<br>
+
+## 二、系统启动篇
+- [Android系统启动流程之init](https://github.com/foxleezh/AOSP/issues/3)<br>
