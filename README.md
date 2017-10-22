@@ -10,9 +10,8 @@
 - [邮箱-foxleezh@gmail.com](foxleezh@gmail.com)
 
 ## 前言
-习惯于使用Android Studio看源码，但是有些Framework的源码还是看不到的，所以本项目将android-8.0.0_r17(目前最新版本)的部分重要代码拷贝到src中直接阅读，这样可以快速在类及方法间跳转。
 
-由于我是从事应用程序开发的，所以主要偏向于分析跟应用程序相关的源码，主要内容如下：
+本项目以android-8.0.0_r17(目前最新版本)和kernel/msm(高通内核android-8.0.0_r0.16)为基础，重点分析跟应用程序相关的源码，主要内容如下：
 - Android系统启动流程，应用启动流程，四大组件启动流程，这将列入系统启动篇
 - 系统常用服务ActivityManagerService,WindowManagerService等，这将列入系统服务篇
 - 通信机制，主要是Binder和Handler，这将列入通信篇
@@ -27,4 +26,4 @@
 - [如何阅读Android源码](https://github.com/foxleezh/AOSP/issues/2)<br>
 
 ## 二、系统启动篇
-- [Android系统启动流程之init](https://github.com/foxleezh/AOSP/issues/3)<br>
+- [Android系统启动流程之Linux内核](https://github.com/foxleezh/AOSP/issues/3)<br>

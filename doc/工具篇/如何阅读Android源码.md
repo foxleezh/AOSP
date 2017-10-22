@@ -58,26 +58,24 @@ Source Insight的好处：
 * 支持方法跳转，类跳转，并且对C++支持很好
 * 支持文件搜索，java,c++，xml都支持，并且支持内容搜索
 * 支持一键导入，随时配置路径
-* 而且最重要的，无论文件有多少，一点都不卡！
+* 而且最重要的，导入文件数多的时候不卡
 
 下面我讲讲如何使用Source Insight
-#### 1、下载安装Source Insight
+### 3.1 下载安装Source Insight
 
 下载地址 http://download.csdn.net/download/foxlee1991/9882553 ，我还专门配置了一个跟Android Studio一样的Darcula主题，下载地址 http://download.csdn.net/download/foxlee1991/9882535
 
-#### 2、导入AOSP源码
+### 3.2 导入AOSP源码
 
 我目前还没有下载完整的AOSP源码，只是先下载了几个重要的源码。打开Source Insight,选择Project -> New Project，取个名字比如叫AOSP，点击OK
 
 ![](http://upload-images.jianshu.io/upload_images/3387045-8412a62d1b79a699.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
 
-
 选择你要查看的源码目录，点击OK
+
 ![](http://upload-images.jianshu.io/upload_images/3387045-c901bed5d8670ddb.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
 
-
 选择需要将哪些目录下的源码导入，点击Add Tree
-
 
 ![](http://upload-images.jianshu.io/upload_images/3387045-5033e5e91f286fa5.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
 
@@ -87,7 +85,7 @@ Source Insight的好处：
 ![](http://upload-images.jianshu.io/upload_images/3387045-cf873591e37eadb3.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
 
 
-#### 3、查看源码
+### 3.3查看源码
 现在进入项目还是一片空白，需要把工具栏打开，然后就可以看源码了
 
 ![](http://upload-images.jianshu.io/upload_images/3387045-c80e01b4511ba549.gif?imageMogr2/auto-orient/strip)
@@ -98,8 +96,27 @@ Source Insight的好处：
 ![](http://upload-images.jianshu.io/upload_images/3387045-0a23a2fc65603414.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
 
 
-还有一些快捷键，比如Ctrl+左键可以方法跳转，左上角有前进和后退，Ctrl+G 是跳转到指定行，Ctrl+F 搜索内容
+还有一些快捷键，比如Ctrl+左键可以方法跳转，左上角有前进和后退，Ctrl+G 是跳转到指定行，Ctrl+F 搜索内容，有时我们会遇到方法无法跳转，这时我们需要点击Project，选择Synchronize Files,全局关联一下，如图
 
-如果你习惯用Android Studio来看源码也是可以的，但是它有两个弊端，一是对C++代码支持不太好，二是如果源码太多会很卡。
+![](http://upload-images.jianshu.io/upload_images/3387045-86700d6d78a03c6c.gif?imageMogr2/auto-orient/strip)
 
-所以我这里会把我阅读的一些源码拷贝到本项目中，保持原有目录结构，源码量不会太多，应该还好。
+这里要注意导入的文件不要太多，太多会导致Synchronize失败，我们可以选择性地导入一些目录
+
+我们在导入源码的时候，有时一些汇编的源码(以.s或.S结尾)无法导入，这时我们需要点击Options，选择File Type Options，在C/C++里添加.s和.S的支持，然后Close，如图
+
+![](http://upload-images.jianshu.io/upload_images/3387045-44d885d884068593.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
+
+然后我们重新追加一些目录，点击Project，选择Add and Remove Projec Files，选择对应目录Add Tree即可，同时我们也可以选择Remove Tree删除对应目录源码，操作如下
+
+![](http://upload-images.jianshu.io/upload_images/3387045-22210ab26d7af252.gif?imageMogr2/auto-orient/strip)
+
+
+## 四、其他
+
+在真正开始阅读Android源码之前，最好是去了解一些C/C++的语法知识，因为源码核心的部分都是用C/C++写的，如果你对一些基础语法不太了解，会看得云里雾里的，这里我给大家推荐两本书[《C标准库 中文版》](http://download.csdn.net/download/foxlee1991/10033921)和[《C++标准库 中文第2版》](http://download.csdn.net/download/foxlee1991/10034335)，另外一些学习网站也不错：
+
+- [微软官方](https://msdn.microsoft.com/zh-cn/library/cscc687y.aspx)
+- [菜鸟教程](http://www.runoob.com/cplusplus/cpp-tutorial.html)
+- [W3Cschool](https://www.w3cschool.cn/cpp/)
+
+我自己本身也刚开始阅读Android源码，准备整理一些阅读笔记，我在github上建了项目，会把笔记以issue的方式展示，方便大家交流，另外我会把阅读的一些源码拷贝到Android Studio项目中，保持原有目录结构，方便大家看笔记时找到对应的源码，[项目地址](https://github.com/foxleezh/AOSP)
