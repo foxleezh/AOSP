@@ -231,7 +231,7 @@ struct task_struct *pid_task(struct pid *pid, enum pid_type type)
 }
 ```
 find_task_by_pid_ns的作用就是根据pid，在hash表中获得对应pid的task_struct
-### 1.8 sched_setscheduler_nocheck
+### 1.9 sched_setscheduler_nocheck
 定义在msm/kernel/sched/core.c中
 ```C
 int sched_setscheduler_nocheck(struct task_struct *p, int policy,
@@ -244,15 +244,138 @@ int sched_setscheduler_nocheck(struct task_struct *p, int policy,
 	return __sched_setscheduler(p, &attr, false); //设置进程调度策略
 }
 ```
+linux内核目前实现了6种调度策略(即调度算法), 用于对不同类型的进程进行调度, 或者支持某些特殊的功能
 
-### 1.9 init_idle_bootup_task
+- SCHED_FIFO和SCHED_RR和SCHED_DEADLINE则采用不同的调度策略调度实时进程，优先级最高
+
+- SCHED_NORMAL和SCHED_BATCH调度普通的非实时进程，优先级普通
+
+- SCHED_IDLE则在系统空闲时调用idle进程，优先级最低
+
+### 1.10 init_idle_bootup_task
 定义在msm/kernel/sched/core.c中
 ```C
 void __cpuinit init_idle_bootup_task(struct task_struct *idle)
 {
-	idle->sched_class = &idle_sched_class; //设置进程的调度类为idle_sched_class
+	idle->sched_class = &idle_sched_class; //设置进程的调度器类为idle_sched_class
 }
 ```
+Linux依据其调度策略的不同实现了5个调度器类, 一个调度器类可以用一种种或者多种调度策略调度某一类进程, 也可以用于特殊情况或者调度特殊功能的进程.
+
+其所属进程的优先级顺序为
+```C
+stop_sched_class -> dl_sched_class -> rt_sched_class -> fair_sched_class -> idle_sched_class
+```
+可见idle_sched_class的优先级最低，只有系统空闲时才调用idle进程
+
+### 1.11 schedule_preempt_disabled
+定义在msm/kernel/sched/core.c中
+```C
+/**
+ * schedule_preempt_disabled - called with preemption disabled
+ *
+ * Returns with preemption disabled. Note: preempt_count must be 1
+ */
+void __sched schedule_preempt_disabled(void)
+{
+	sched_preempt_enable_no_resched(); //开启内核抢占
+	schedule();  // 并主动请求调度，让出cpu
+	preempt_disable(); // 关闭内核抢占
+}
+```
+
+1.9到1.11都涉及到Linux的进程调度问题，可以参考 [Linux用户抢占和内核抢占详解](http://blog.csdn.net/gatieme/article/details/51872618)
+
+### 1.12 cpu_startup_entry
+定义在msm/kernel/cpu/idle.c中
+```C
+void cpu_startup_entry(enum cpuhp_state state)
+{
+	/*
+	 * This #ifdef needs to die, but it's too late in the cycle to
+	 * make this generic (arm and sh have never invoked the canary
+	 * init for the non boot cpus!). Will be fixed in 3.11
+	 */
+#ifdef CONFIG_X86
+	/*
+	 * If we're the non-boot CPU, nothing set the stack canary up
+	 * for us. The boot CPU already has it initialized but no harm
+	 * in doing it again. This is a good place for updating it, as
+	 * we wont ever return from this function (so the invalid
+	 * canaries already on the stack wont ever trigger).
+	 */
+	boot_init_stack_canary();//只有在x86这种non-boot CPU机器上执行，该函数主要用于初始化stack_canary的值,用于防止栈溢出
+#endif
+	__current_set_polling(); //设置本架构下面有标示轮询poll的bit位，保证cpu进行重新调度。
+	arch_cpu_idle_prepare(); //进行idle前的准备工作，ARM64中没有实现
+	per_cpu(idle_force_poll, smp_processor_id()) = 0;
+	cpu_idle_loop(); //进入idle进程的事件循环
+}
+
+```
+### 1.12 cpu_idle_loop
+定义在msm/kernel/cpu/idle.c中
+```C
+/*
+ * Generic idle loop implementation
+ */
+static void cpu_idle_loop(void)
+{
+	while (1) { //开启无限循环，进行进程调度
+		tick_nohz_idle_enter(); //停止周期时钟
+
+		while (!need_resched()) { //判断是否有设置TIF_NEED_RESCHED，只有系统没有进程需要调度时才执行while里面操作
+			check_pgt_cache();
+			rmb();
+
+			local_irq_disable(); //关闭irq中断
+			arch_cpu_idle_enter();
+
+			/*
+			 * In poll mode we reenable interrupts and spin.
+			 *
+			 * Also if we detected in the wakeup from idle
+			 * path that the tick broadcast device expired
+			 * for us, we don't want to go deep idle as we
+			 * know that the IPI is going to arrive right
+			 * away
+			 */
+			if (cpu_idle_force_poll ||
+			    tick_check_broadcast_expired() ||
+			    __get_cpu_var(idle_force_poll)) {
+				cpu_idle_poll(); //进入 CPU 的poll mode模式，避免进入深度睡眠，可以处理 处理器间中断
+			} else {
+				if (!current_clr_polling_and_test()) {
+					stop_critical_timings();
+					rcu_idle_enter();
+					arch_cpu_idle(); //进入 CPU 的 idle 模式，省电
+					WARN_ON_ONCE(irqs_disabled());
+					rcu_idle_exit();
+					start_critical_timings();
+				} else {
+					local_irq_enable();
+				}
+				__current_set_polling();
+			}
+			arch_cpu_idle_exit();
+		}
+		tick_nohz_idle_exit(); //如果有进程需要调度，则先开启周期时钟
+		schedule_preempt_disabled(); //让出cpu，执行调度
+		if (cpu_is_offline(smp_processor_id())) //如果当前cpu处理offline状态，关闭idle进程
+			arch_cpu_idle_dead();
+
+	}
+}
+```
+
+idle进程并不执行什么复杂的工作，只有在系统没有其他进程调度的时候才进入idle进程，而在idle进程中尽可能让cpu空闲下来，连周期时钟也关掉了，达到省电目的。
+
+当有其他进程需要调度的时候，马上开启周期时钟，然后让出cpu
+
+**小结**
+
+idle进程是Linux系统的第一个进程，进程号是0，在完成系统环境初始化工作之后，开启了两个重要的进程，init进程和kthreadd进程，执行完创建工作之后，开启一个无限循环，负责进程的调度。
+
 ## 二、kthreadd进程启动
 
 之前在rest_init函数中启动了kthreadd进程
