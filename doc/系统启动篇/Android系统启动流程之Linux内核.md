@@ -31,6 +31,7 @@ msm/kernel/pid.c
 msm/include/linux/sched.h
 msm/kernel/sched/core.c
 msm/kernel/cpu/idle.c
+msm/drivers/base/init.c
 ```
 
 ## 一、idle进程启动
@@ -607,13 +608,13 @@ static int __ref kernel_init(void *unused)
 {
 	kernel_init_freeable(); //进行init进程的一些初始化操作
 	/* need to finish all async __init code before freeing the memory */
-	async_synchronize_full();// 等待所有异步调用执行完成
+	async_synchronize_full();// 等待所有异步调用执行完成,，在释放内存前，必须完成所有的异步 __init 代码
 	free_initmem();// 释放所有init.* 段中的内存
 	mark_rodata_ro(); //arm64空实现
 	system_state = SYSTEM_RUNNING;// 设置系统状态为运行状态
 	numa_default_policy(); // 设定NUMA系统的默认内存访问策略
 
-	flush_delayed_fput(); // 同步所有延时fput
+	flush_delayed_fput(); // 释放所有延时的struct file结构体
 
 	if (ramdisk_execute_command) { //ramdisk_execute_command的值为"/init"
 		if (!run_init_process(ramdisk_execute_command)) //运行根目录下的init程序
@@ -650,9 +651,180 @@ ramdisk_execute_command和execute_command的值是通过bootloader传递过来�
 
 ramdisk_execute_command如果没有被赋值，kernel_init_freeable函数会赋一个初始值"/init"
 
+### 3.2 kernel_init_freeable
+定义在msm/init/main.c中
+```C
+static noinline void __init kernel_init_freeable(void)
+{
+	/*
+	 * Wait until kthreadd is all set-up.
+	 */
+	wait_for_completion(&kthreadd_done); //等待&kthreadd_done这个值complete,这个在rest_init方法中有写，在ktreadd进程启动完成后设置为complete
 
-http://blog.csdn.net/gatieme/article/details/51484562
-http://blog.csdn.net/xichangbao/article/details/52938240
+	/* Now the scheduler is fully set up and can do blocking allocations */
+	gfp_allowed_mask = __GFP_BITS_MASK;//设置bitmask, 使得init进程可以使用PM并且允许I/O阻塞操作
+
+	/*
+	 * init can allocate pages on any node
+	 */
+	set_mems_allowed(node_states[N_MEMORY]);//init进程可以分配物理页面
+	/*
+	 * init can run on any cpu.
+	 */
+	set_cpus_allowed_ptr(current, cpu_all_mask); //init进程可以在任意cpu上执行
+
+	cad_pid = task_pid(current); //设置到init进程的pid号给cad_pid，cad就是ctrl-alt-del，设置init进程来处理ctrl-alt-del信号
+
+	smp_prepare_cpus(setup_max_cpus);//设置smp初始化时的最大CPU数量，然后将对应数量的CPU状态设置为present
+
+	do_pre_smp_initcalls();//调用__initcall_start到__initcall0_start之间的initcall_t函数指针
+	lockup_detector_init(); //开启watchdog_threads，watchdog主要用来监控、管理CPU的运行状态
+
+	smp_init();//启动cpu0外的其他cpu核
+	sched_init_smp(); //进程调度域初始化
+
+	do_basic_setup();//初始化设备，驱动等，这个方法比较重要，将在下面单独讲
+
+	/* Open the /dev/console on the rootfs, this should never fail */
+	if (sys_open((const char __user *) "/dev/console", O_RDWR, 0) < 0) // 打开/dev/console，文件号0，作为init进程标准输入
+		pr_err("Warning: unable to open an initial console.\n");
+
+	(void) sys_dup(0);// 标准输入
+	(void) sys_dup(0);// 标准输出
+	/*
+	 * check if there is an early userspace init.  If yes, let it do all
+	 * the work
+	 */
+
+	if (!ramdisk_execute_command)  //如果 ramdisk_execute_command 没有赋值，则赋值为"/init"，之前有讲到
+		ramdisk_execute_command = "/init";
+
+	if (sys_access((const char __user *) ramdisk_execute_command, 0) != 0) { // 尝试进入ramdisk_execute_command指向的文件，如果失败则重新挂载根文件系统
+		ramdisk_execute_command = NULL;
+		prepare_namespace();
+	}
+
+	/*
+	 * Ok, we have completed the initial bootup, and
+	 * we're essentially up and running. Get rid of the
+	 * initmem segments and start the user-mode stuff..
+	 */
+
+	/* rootfs is available now, try loading default modules */
+	load_default_modules(); // 加载I/O调度的电梯算法
+}
+
+```
+kernel_init_freeable函数做了很多重要的事情
+
+- 启动了smp，smp全称是Symmetrical Multi-Processing，即对称多处理，是指在一个计算机上汇集了一组处理器(多CPU),各CPU之间共享内存子系统以及总线结构。
+- 初始化设备和驱动程序
+- 打开标准输入和输出
+- 初始化文件系统
+
+### 3.3 do_basic_setup
+定义在msm/init/main.c中
+```C
+/*
+ * Ok, the machine is now initialized. None of the devices
+ * have been touched yet, but the CPU subsystem is up and
+ * running, and memory and process management works.
+ *
+ * Now we can finally start doing some real work..
+ */
+static void __init do_basic_setup(void)
+{
+	cpuset_init_smp();//针对SMP系统，初始化内核control group的cpuset子系统。
+	usermodehelper_init();// 创建khelper单线程工作队列，用于协助新建和运行用户空间程序
+	shmem_init();// 初始化共享内存
+	driver_init();// 初始化设备驱动，比较重要下面单独讲
+	init_irq_proc();//创建/proc/irq目录, 并初始化系统中所有中断对应的子目录
+	do_ctors();// 执行内核的构造函数
+	usermodehelper_enable();// 启用usermodehelper
+	do_initcalls();//遍历initcall_levels数组，调用里面的initcall函数，这里主要是对设备、驱动、文件系统进行初始化，之所有将函数封装到数组进行遍历，主要是为了好扩展
+	random_int_secret_init();初始化随机数生成池
+}
+```
+
+### 3.4 driver_init
+定义在msm/drivers/base/init.c中
+```C
+/**
+ * driver_init - initialize driver model.
+ *
+ * Call the driver model init functions to initialize their
+ * subsystems. Called early from init/main.c.
+ */
+void __init driver_init(void)
+{
+	/* These are the core pieces */
+	devtmpfs_init();// 注册devtmpfs文件系统，启动kdevtmpfs进程
+	devices_init();// 初始化驱动模型中的部分子系统，kset：devices 和 kobject：dev、 dev/block、 dev/char
+	buses_init();// 初始化驱动模型中的bus子系统，kset：bus、devices/system
+	classes_init();// 初始化驱动模型中的class子系统，kset：class
+	firmware_init();// 初始化驱动模型中的firmware子系统 ，kobject：firmware
+	hypervisor_init();// 初始化驱动模型中的hypervisor子系统，kobject：hypervisor
+
+	/* These are also core pieces, but must come after the
+	 * core core pieces.
+	 */
+	platform_bus_init();// 初始化驱动模型中的bus/platform子系统,这个节点是所有platform设备和驱动的总线类型，即所有platform设备和驱动都会挂载到这个总线上
+	cpu_dev_init(); // 初始化驱动模型中的devices/system/cpu子系统,该节点包含CPU相关的属性
+	memory_dev_init();//初始化驱动模型中的/devices/system/memory子系统,该节点包含了内存相关的属性，如块大小等
+}
+
+```
+这个函数完成驱动子系统的构建，实现了Linux设备驱动的一个整体框架，但是它只是建立了目录结构，具体驱动的装载是在do_initcalls函数，之前有讲
+
+kernel_init_freeable函数告一段落了，我们接着讲kernel_init中剩余的函数
+
+### 3.5 free_initmem
+定义在msm/arch/arm64/mm/init.c中中
+
+```C
+void free_initmem(void)
+{
+	poison_init_mem(__init_begin, __init_end - __init_begin);
+	free_initmem_default(0);
+}
+```
+
+所有使用__init标记过的函数和使用__initdata标记过的数据，在free_initmem函数执行后，都不能使用，它们曾经获得的内存现在可以重新用于其他目的。
+
+### 3.6 flush_delayed_fput
+定义在msm/arch/arm64/mm/init.c中,它执行的是delayed_fput(NULL)
+```C
+static void delayed_fput(struct work_struct *unused)
+{
+	LIST_HEAD(head);
+	spin_lock_irq(&delayed_fput_lock);
+	list_splice_init(&delayed_fput_list, &head);
+	spin_unlock_irq(&delayed_fput_lock);
+	while (!list_empty(&head)) {
+		struct file *f = list_first_entry(&head, struct file, f_u.fu_list);
+		list_del_init(&f->f_u.fu_list); //删除fu_list
+		__fput(f); //释放struct file
+	}
+}
+```
+这个函数主要用于释放&delayed_fput_list这个链表中的struct file，struct file即文件结构体，代表一个打开的文件，系统中的每个打开的文件在内核空间都有一个关联的 struct file。
+
+### 3.7 run_init_process
+定义在msm/init/main.c中
+```C
+static int run_init_process(const char *init_filename)
+{
+	argv_init[0] = init_filename;
+	return do_execve(init_filename,
+		(const char __user *const __user *)argv_init,
+		(const char __user *const __user *)envp_init); //do_execve就是执行一个可执行文件
+}
+```
+
+run_init_process就是运行可执行文件了，从kernel_init函数中可知，系统会依次去找根目录下的init，execute_command，/sbin/init，/etc/init，/bin/init,/bin/sh这六个可执行文件，只要找到其中一个，其他就不执行。
+
+Android系统一般会在根目录下放一个init的可执行文件，也就是说Linux系统的init进程在内核初始化完成后，就直接执行init这个文件，这个文件的源代码在platform/system/core/init/init.cpp，下一篇文章中我将从这个文件为入口，讲解Android系统的init进程。
+
 
 
 
