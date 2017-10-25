@@ -1,8 +1,14 @@
 ## 前言
 
-我们都知道Android系统的第一个进程叫init进程，它是Linux系统的第一个用户进程，这个进程会孵化出许多重要的进程，是Android系统中很重要的一个进程。
+Android本质上就是一个基于Linux内核的操作系统，与Ubuntu Linux、Fedora Linux类似，我们要讲Android，必定先要了解一些Linux内核的知识。
 
-很多文章分析Android系统启动都从init进程开始，但是大家有没有想过init进程是怎么创建的，Linux内核启动都干了些什么，这里涉及3个特殊的进程，idle进程(PID = 0), init进程(PID = 1)和kthreadd(PID = 2)
+Linux内核的东西特别多，我也不可能全部讲完，由于本文主要讲解Android系统启动流程，所以这里主要讲一些内核启动相关的知识。
+
+Linux内核启动主要涉及3个特殊的进程，idle进程(PID = 0), init进程(PID = 1)和kthreadd进程(PID = 2)，这三个进程是内核的基础。
+
+- idle进程是Linux系统第一个进程，是init进程和kthreadd进程的父进程
+- init进程是Linux系统第一个用户进程，是Android系统应用程序的始祖，我们的app都是直接或间接以它为父进程
+- kthreadd进程是Linux系统内核管家，所有的内核线程都是直接或间接以它为父进程
 
 本文将以这三个进程为线索，主要讲解以下内容：
 
@@ -29,7 +35,7 @@ msm/kernel/cpu/idle.c
 
 ## 一、idle进程启动
 
-我们讲说init进程是Android的第一个进程，它的进程号是1，既然进程号是1，那么有没有进程号是0的进程呢，其实是有的。
+很多文章讲Android都从init进程讲起，它的进程号是1，既然进程号是1，那么有没有进程号是0的进程呢，其实是有的。
 
 这个进程名字叫init_task，后期会退化为idle，它是Linux系统的第一个进程(init进程是第一个用户进程)，也是唯一一个没有通过fork或者kernel_thread产生的进程，它在完成初始化操作后，主要负责进程调度、交换。
 
@@ -79,6 +85,8 @@ static noinline void __init_refok rest_init(void) //C语言中不带参数的方
 	cpu_startup_entry(CPUHP_ONLINE);// 这个函数会调用cpu_idle_loop()使得idle进程进入自己的事件处理循环
 }
 ```
+
+rest_init的字面意思是剩余的初始化，但是它却一点都不剩余，它创建了Linux系统中两个重要的进程init和kthreadd，并且将init_task进程变为idle进程，接下来我将把rest_init中的方法逐个解析，方便大家理解。
 
 ### 1.2 rcu_scheduler_starting
 定义在msm/kernel/rcutree.c
@@ -313,7 +321,7 @@ void cpu_startup_entry(enum cpuhp_state state)
 }
 
 ```
-### 1.12 cpu_idle_loop
+### 1.13 cpu_idle_loop
 定义在msm/kernel/cpu/idle.c中
 ```C
 /*
@@ -368,9 +376,7 @@ static void cpu_idle_loop(void)
 }
 ```
 
-idle进程并不执行什么复杂的工作，只有在系统没有其他进程调度的时候才进入idle进程，而在idle进程中尽可能让cpu空闲下来，连周期时钟也关掉了，达到省电目的。
-
-当有其他进程需要调度的时候，马上开启周期时钟，然后让出cpu
+idle进程并不执行什么复杂的工作，只有在系统没有其他进程调度的时候才进入idle进程，而在idle进程中尽可能让cpu空闲下来，连周期时钟也关掉了，达到省电目的。当有其他进程需要调度的时候，马上开启周期时钟，然后让出cpu。
 
 **小结**
 
@@ -579,6 +585,70 @@ kthreadd进程由idle通过kernel_thread创建，并始终运行在内核空间,
 - kthread函数完成一些初始赋值后就让出CPU，并没有执行新线程的工作函数，因此需要手工 wake up被唤醒后，新线程才执行自己的真正工作函数。
 
 - 当我们调用kthread_create和kthread_run创建的内核线程会被加入到kthread_create_list链表，kthread_create不会手动wake up新线程，kthread_run会手动wake up新线程。
+
+其实这就是一个典型的生产者消费者模式，kthread_create和kthread_run负责生产各种内核线程创建需求，kthreadd开启循环去消费各种内核线程创建需求。
+
+## 三、init进程启动
+
+init进程分为前后两部分，前一部分是在内核启动的，主要是完成创建和内核初始化工作，内容都是跟Linux内核相关的;后一部分是在用户空间启动的，主要完成Android系统的初始化工作。
+
+我这里要讲的是前一部分，后一部分将在下一篇文章中讲述。
+
+之前在rest_init函数中启动了init进程
+```C
+kernel_thread(kernel_init, NULL, CLONE_FS | CLONE_SIGHAND);
+```
+在创建完init进程后，会调用kernel_init函数
+
+### 3.1 kernel_init
+定义在msm/init/main.c中
+```C
+static int __ref kernel_init(void *unused)
+{
+	kernel_init_freeable(); //进行init进程的一些初始化操作
+	/* need to finish all async __init code before freeing the memory */
+	async_synchronize_full();// 等待所有异步调用执行完成
+	free_initmem();// 释放所有init.* 段中的内存
+	mark_rodata_ro(); //arm64空实现
+	system_state = SYSTEM_RUNNING;// 设置系统状态为运行状态
+	numa_default_policy(); // 设定NUMA系统的默认内存访问策略
+
+	flush_delayed_fput(); // 同步所有延时fput
+
+	if (ramdisk_execute_command) { //ramdisk_execute_command的值为"/init"
+		if (!run_init_process(ramdisk_execute_command)) //运行根目录下的init程序
+			return 0;
+		pr_err("Failed to execute %s\n", ramdisk_execute_command);
+	}
+
+	/*
+	 * We try each of these until one succeeds.
+	 *
+	 * The Bourne shell can be used instead of init if we are
+	 * trying to recover a really broken machine.
+	 */
+	if (execute_command) { //execute_command的值如果有定义就去根目录下找对应的应用程序,然后启动
+		if (!run_init_process(execute_command))
+			return 0;
+		pr_err("Failed to execute %s.  Attempting defaults...\n",
+			execute_command);
+	}
+	if (!run_init_process("/sbin/init") || //如果ramdisk_execute_command和execute_command定义的应用程序都没有找到，就到根目录下找 /sbin/init，/etc/init，/bin/init,/bin/sh 这四个应用程序进行启动
+	    !run_init_process("/etc/init") ||
+	    !run_init_process("/bin/init") ||
+	    !run_init_process("/bin/sh"))
+		return 0;
+
+	panic("No init found.  Try passing init= option to kernel. "
+	      "See Linux Documentation/init.txt for guidance.");
+}
+```
+
+kernel_init主要工作是完成一些init的初始化操作，然后去系统根目录下依次找ramdisk_execute_command和execute_command设置的应用程序，如果这两个目录都找不到，就依次去根目录下找 /sbin/init，/etc/init，/bin/init,/bin/sh 这四个应用程序进行启动，只要这些应用程序有一个启动了，其他就不启动了
+
+ramdisk_execute_command和execute_command的值是通过bootloader传递过来的参数设置的，ramdisk_execute_command通过"rdinit"参数赋值，execute_command通过"init"参数赋值
+
+ramdisk_execute_command如果没有被赋值，kernel_init_freeable函数会赋一个初始值"/init"
 
 
 http://blog.csdn.net/gatieme/article/details/51484562
