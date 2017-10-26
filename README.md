@@ -24,6 +24,8 @@
 ## 一、工具篇
 - [如何下载Android源码](https://github.com/foxleezh/AOSP/issues/1)<br>
 - [如何阅读Android源码](https://github.com/foxleezh/AOSP/issues/2)<br>
+- [C语言知识整理](https://github.com/foxleezh/AOSP/issues/4)<br>
+- [Linux常见内核函数](https://github.com/foxleezh/AOSP/issues/5)<br>
 
 ## 二、系统启动篇
 - [Android系统启动流程之Linux内核](https://github.com/foxleezh/AOSP/issues/3)<br>
