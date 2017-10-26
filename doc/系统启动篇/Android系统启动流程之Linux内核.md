@@ -40,7 +40,7 @@ msm/drivers/base/init.c
 
 这个进程名字叫init_task，后期会退化为idle，它是Linux系统的第一个进程(init进程是第一个用户进程)，也是唯一一个没有通过fork或者kernel_thread产生的进程，它在完成初始化操作后，主要负责进程调度、交换。
 
-idle进程的启动是用汇编语言写的，对应文件是msm/arch/arm64/kernel/head.S，因为都是用汇编语言写的，我就不多介绍了，具体可参考 [kernel 启动流程之head.S](http://blog.csdn.net/forever_2015/article/details/52885250) ,其中有一句比较重要
+idle进程的启动是用汇编语言写的，对应文件是msm/arch/arm64/kernel/head.S，因为都是用汇编语言写的，我就不多介绍了，具体可参考 [kernel 启动流程之head.S](http://blog.csdn.net/forever_2015/article/details/52885250) ,这里面有一句比较重要
 
 
 ```c
@@ -51,14 +51,32 @@ idle进程的启动是用汇编语言写的，对应文件是msm/arch/arm64/kern
 344 	b	start_kernel        //跳转start_kernel函数
 ```
 
-b 就是跳转的意思，跳转到start_kernel.h，这个头文件对应的实现在msm/init/main.c，start_kernel函数在最后会调用rest_init函数，这个函数开启了init进程和kthreadd进程，我们来分析下rest_init函数
+第344行，b	start_kernel，b 就是跳转的意思，跳转到start_kernel.h，这个头文件对应的实现在msm/init/main.c，start_kernel函数在最后会调用rest_init函数，这个函数开启了init进程和kthreadd进程，我们着重分析下rest_init函数。
+
+在讲源码前，我先说明下我分析源码的写作风格：
+- 一般我会在函数下面写明该函数所在的位置，比如定义在msm/init/main.c中，这样大家就可以去项目里找到源文件
+- 我会把源码相应的英文注释也一并copy进来，这样方便英文好的人可以看到原作者的注释
+- 我会尽可能将函数中每一行代码的作用注释下(一般以//的形式注释在代码结尾)，大家在看源码的同时就可以理解这段代码作用，这也是我花时间最多的,请大家务必认真看。我也想过在源码外部统一通过行号来解释，但是感觉这样需要大家一会儿看源码，一会儿看解释，上下来回看不方便，所以干脆写在一起了
+- 在函数结尾我尽可能总结下这个函数做了些什么，以及这个函数涉及到的一些知识
+- 对于重要的函数，我会将函数中每一个调用的子函数再单独拿出来讲解
+- 考虑到大家都是开发Android的比较多，对C/C++不太了解，在注释中我也会讲一些C/C++的知识，方便大家理解，C语言注释我一般用/** */的形式注释在代码顶头
+- 为了更好的阅读体验，希望大家可以下载一下Source Insight同步看代码，[使用教程](https://juejin.im/post/59ec35f8f265da4307026b79) ,可以直接将[项目](https://github.com/foxleezh/AOSP)中app/src/main/cpp作为目录加入到Source Insight中
 
 ### 1.1 rest_init
-
+定义在msm/init/main.c中
 ```C
-static noinline void __init_refok rest_init(void) //C语言中不带参数的方法会加一个void
+/*
+ * C语言oninline与inline是一对意义相反的关键字，inline的作用是编译期间直接替换代码块，也就是说编译后就没有这个方法了，而是直接把代码块替换调用这个函数的地方，oninline就相反，强制不替换，保持原有的函数
+ * __init_refok是__init的扩展，__init 定义的初始化函数会放入名叫.init.text的输入段，当内核启动完毕后，这个段中的内存会被释放掉，在本文中有讲，关注3.5 free_initmem。
+ * 不带参数的方法会加一个void参数
+ */
+static noinline void __init_refok rest_init(void)
 {
 	int pid;
+	/*
+	 * C语言中const相当于Java中的final static， 表示常量
+	 * struct是结构体，相当于Java中定义了一个实体类，里面只有一些成员变量，{.sched_priority =1 }相当于new，然后将成员变量sched_priority的值赋为1
+	 */
 	const struct sched_param param = { .sched_priority = 1 }; //初始化优先级为1的进程调度策略，取值1~99，1为最小
 
 	rcu_scheduler_starting(); //启动RCU机制，这个与后面的rcu_read_lock和rcu_read_unlock是配套的，用于多核同步
@@ -67,10 +85,18 @@ static noinline void __init_refok rest_init(void) //C语言中不带参数的方
 	 * the init task will end up wanting to create kthreads, which, if
 	 * we schedule it before we create kthreadd, will OOPS.
 	 */
+
+	/*
+     * C语言中支持方法传参，kernel_thread是函数，kernel_init也是函数，但是kernel_init却作为参数传递了过去，其实传递过去的是一个函数指针,参考[函数指针](http://www.cnblogs.com/haore147/p/3647262.html)
+     * CLONE_FS这种大写的一般就是常量了，跟Java差不多
+     */
 	kernel_thread(kernel_init, NULL, CLONE_FS | CLONE_SIGHAND); //用kernel_thread方式创建init进程，CLONE_FS 子进程与父进程共享相同的文件系统，包括root、当前目录、umask，CLONE_SIGHAND  子进程与父进程共享相同的信号处理（signal handler）表
 	numa_default_policy(); // 设定NUMA系统的默认内存访问策略
 	pid = kernel_thread(kthreadd, NULL, CLONE_FS | CLONE_FILES);//用kernel_thread方式创建kthreadd进程，CLONE_FILES  子进程与父进程共享相同的文件描述符（file descriptor）表
 	rcu_read_lock(); //打开RCU读取锁，在此期间无法进行进程切换
+	/*
+	 * C语言中&的作用是获得变量的内存地址，参考[C指针](http://www.runoob.com/cprogramming/c-pointers.html)
+	 */
 	kthreadd_task = find_task_by_pid_ns(pid, &init_pid_ns);// 获取kthreadd的进程描述符，期间需要检索进程pid的使用链表，所以要加锁
 	rcu_read_unlock(); //关闭RCU读取锁
 	sched_setscheduler_nocheck(kthreadd_task, SCHED_FIFO, &param); //设置kthreadd的进程调度策略，SCHED_FIFO 实时调度策略，即马上调用，先到先服务，param的优先级之前定义为1
@@ -80,7 +106,7 @@ static noinline void __init_refok rest_init(void) //C语言中不带参数的方
 	 * The boot idle thread must execute schedule()
 	 * at least once to get things moving:
 	 */
-	init_idle_bootup_task(current);//当前0号进程init_task设置为idle进程
+	init_idle_bootup_task(current);//current表示当前进程，当前0号进程init_task设置为idle进程
 	schedule_preempt_disabled(); //0号进程主动请求调度，让出cpu，1号进程kernel_init将会运行,并且禁止抢占
 	/* Call into cpu_idle with preempt disabled */
 	cpu_startup_entry(CPUHP_ONLINE);// 这个函数会调用cpu_idle_loop()使得idle进程进入自己的事件处理循环
@@ -113,6 +139,12 @@ void rcu_scheduler_starting(void)
 ```C
 /*
  * Create a kernel thread.
+ */
+ 
+/*
+ * C语言中 int (*fn)(void *)表示函数指针的定义，int是返回值，void是函数的参数，fn是名字
+ * C语言中 * 表示指针，这个用法很多
+ * unsigned表示无符号，一般与long,int,char等结合使用，表示范围只有正数，比如init表示范围-2147483648～2147483647 ，那unsigned表示范围0～4294967295，足足多了一倍
  */
 pid_t kernel_thread(int (*fn)(void *), void *arg, unsigned long flags)
 {
@@ -219,6 +251,9 @@ struct pid *find_pid_ns(int nr, struct pid_namespace *ns)
 
 	hlist_for_each_entry_rcu(pnr,
 			&pid_hash[pid_hashfn(nr, ns)], pid_chain)
+			/*
+			 * C语言中 -> 用于指向结构体 struct 中的数据
+			 */
 		if (pnr->nr == nr && pnr->ns == ns)
 			return container_of(pnr, struct pid,
 					numbers[ns->level]); //遍历hash表，找到struct pid
@@ -305,6 +340,12 @@ void cpu_startup_entry(enum cpuhp_state state)
 	 * make this generic (arm and sh have never invoked the canary
 	 * init for the non boot cpus!). Will be fixed in 3.11
 	 */
+	 
+	 
+	 /*
+	  * C语言中#ifdef和#else、#endif是条件编译语句，也就是说在满足某些条件的时候，夹在这几个关键字中间的代码才编译，不满足就不编译
+	  * 下面这句话的意思就是如果定义了CONFIG_X86这个宏，就把boot_init_stack_canary这个代码编译进去
+	  */
 #ifdef CONFIG_X86
 	/*
 	 * If we're the non-boot CPU, nothing set the stack canary up
@@ -407,9 +448,7 @@ int kthreadd(void *unused)
 	current->flags |= PF_NOFREEZE;
 
 	for (;;) {
-		 /*  首先将线程状态设置为 TASK_INTERRUPTIBLE, 如果当前
-            没有要创建的线程则主动放弃 CPU 完成调度.此进程变为阻塞态*/
-		set_current_state(TASK_INTERRUPTIBLE);
+		set_current_state(TASK_INTERRUPTIBLE); //首先将线程状态设置为 TASK_INTERRUPTIBLE, 如果当前没有要创建的线程则主动放弃 CPU 完成调度.此进程变为阻塞态
 		if (list_empty(&kthread_create_list)) //  没有需要创建的内核线程
 			schedule(); //   执行一次调度, 让出CPU
 		__set_current_state(TASK_RUNNING);//  运行到此表示 kthreadd 线程被唤醒(就是我们当前),设置进程运行状态为 TASK_RUNNING
@@ -604,6 +643,9 @@ kernel_thread(kernel_init, NULL, CLONE_FS | CLONE_SIGHAND);
 ### 3.1 kernel_init
 定义在msm/init/main.c中
 ```C
+/*
+ * __ref 这个跟之前讲的__init作用一样
+ */
 static int __ref kernel_init(void *unused)
 {
 	kernel_init_freeable(); //进行init进程的一些初始化操作
@@ -742,7 +784,7 @@ static void __init do_basic_setup(void)
 	do_ctors();// 执行内核的构造函数
 	usermodehelper_enable();// 启用usermodehelper
 	do_initcalls();//遍历initcall_levels数组，调用里面的initcall函数，这里主要是对设备、驱动、文件系统进行初始化，之所有将函数封装到数组进行遍历，主要是为了好扩展
-	random_int_secret_init();初始化随机数生成池
+	random_int_secret_init();//初始化随机数生成池
 }
 ```
 
