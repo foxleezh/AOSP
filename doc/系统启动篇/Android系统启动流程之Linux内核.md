@@ -59,6 +59,7 @@ idle进程的启动是用汇编语言写的，对应文件是msm/arch/arm64/kern
 - 一般我会在函数下面写明该函数所在的位置，比如定义在msm/init/main.c中，这样大家就可以去项目里找到源文件
 - 我会把源码相应的英文注释也一并copy进来，这样方便英文好的人可以看到原作者的注释
 - 我会尽可能将函数中每一行代码的作用注释下(一般以//的形式注释在代码结尾)，大家在看源码的同时就可以理解这段代码作用，这也是我花时间最多的,请大家务必认真看。我也想过在源码外部统一通过行号来解释，但是感觉这样需要大家一会儿看源码，一会儿看解释，上下来回看不方便，所以干脆写在一起了
+- 为了大家更好地阅读注释，我会手动做换行处理，//形式注释可能会换行到句首，也就是可能会出现在代码下方
 - 在函数结尾我尽可能总结下这个函数做了些什么，以及这个函数涉及到的一些知识
 - 对于重要的函数，我会将函数中每一个调用的子函数再单独拿出来讲解
 - 考虑到大家都是开发Android的比较多，对C/C++不太了解，在注释中我也会讲一些C/C++的知识，方便大家理解，C语言注释我一般用/** */的形式注释在代码顶头
@@ -68,18 +69,22 @@ idle进程的启动是用汇编语言写的，对应文件是msm/arch/arm64/kern
 定义在msm/init/main.c中
 ```C
 /*
- * C语言oninline与inline是一对意义相反的关键字，inline的作用是编译期间直接替换代码块，也就是说编译后就没有这个方法了，而是直接把代码块替换调用这个函数的地方，oninline就相反，强制不替换，保持原有的函数
- * __init_refok是__init的扩展，__init 定义的初始化函数会放入名叫.init.text的输入段，当内核启动完毕后，这个段中的内存会被释放掉，在本文中有讲，关注3.5 free_initmem。
- * 不带参数的方法会加一个void参数
+ * 1.C语言oninline与inline是一对意义相反的关键字，inline的作用是编译期间直接替换代码块，也就是说编译后就没有这个方法了，
+ * 而是直接把代码块替换调用这个函数的地方，oninline就相反，强制不替换，保持原有的函数
+ * 2.__init_refok是__init的扩展，__init 定义的初始化函数会放入名叫.init.text的输入段，当内核启动完毕后，
+ * 这个段中的内存会被释放掉，在本文中有讲，关注3.5 free_initmem
+ * 3.不带参数的方法会加一个void参数
  */
 static noinline void __init_refok rest_init(void)
 {
 	int pid;
 	/*
-	 * C语言中const相当于Java中的final static， 表示常量
-	 * struct是结构体，相当于Java中定义了一个实体类，里面只有一些成员变量，{.sched_priority =1 }相当于new，然后将成员变量sched_priority的值赋为1
+	 * 1.C语言中const相当于Java中的final static， 表示常量
+	 * 2.struct是结构体，相当于Java中定义了一个实体类，里面只有一些成员变量，{.sched_priority =1 }相当于new，
+	 * 然后将成员变量sched_priority的值赋为1
 	 */
-	const struct sched_param param = { .sched_priority = 1 }; //初始化优先级为1的进程调度策略，取值1~99，1为最小
+	const struct sched_param param = { .sched_priority = 1 }; //初始化优先级为1的进程调度策略，
+	//取值1~99，1为最小
 
 	rcu_scheduler_starting(); //启动RCU机制，这个与后面的rcu_read_lock和rcu_read_unlock是配套的，用于多核同步
 	/*
@@ -89,20 +94,32 @@ static noinline void __init_refok rest_init(void)
 	 */
 
 	/*
-     * C语言中支持方法传参，kernel_thread是函数，kernel_init也是函数，但是kernel_init却作为参数传递了过去，其实传递过去的是一个函数指针,参考[函数指针](http://www.cnblogs.com/haore147/p/3647262.html)
-     * CLONE_FS这种大写的一般就是常量了，跟Java差不多
+     * 1.C语言中支持方法传参，kernel_thread是函数，kernel_init也是函数，但是kernel_init却作为参数传递了过去，
+     * 其实传递过去的是一个函数指针,参考[函数指针](http://www.cnblogs.com/haore147/p/3647262.html)
+     * 2.CLONE_FS这种大写的一般就是常量了，跟Java差不多
      */
-	kernel_thread(kernel_init, NULL, CLONE_FS | CLONE_SIGHAND); //用kernel_thread方式创建init进程，CLONE_FS 子进程与父进程共享相同的文件系统，包括root、当前目录、umask，CLONE_SIGHAND  子进程与父进程共享相同的信号处理（signal handler）表
+	kernel_thread(kernel_init, NULL, CLONE_FS | CLONE_SIGHAND); //用kernel_thread方式创建init进程，
+	//CLONE_FS 子进程与父进程共享相同的文件系统，包括root、当前目录、umask，
+	//CLONE_SIGHAND  子进程与父进程共享相同的信号处理（signal handler）表
+
 	numa_default_policy(); // 设定NUMA系统的默认内存访问策略
-	pid = kernel_thread(kthreadd, NULL, CLONE_FS | CLONE_FILES);//用kernel_thread方式创建kthreadd进程，CLONE_FILES  子进程与父进程共享相同的文件描述符（file descriptor）表
+	pid = kernel_thread(kthreadd, NULL, CLONE_FS | CLONE_FILES);//用kernel_thread方式创建kthreadd进程，
+	//CLONE_FILES  子进程与父进程共享相同的文件描述符（file descriptor）表
+
 	rcu_read_lock(); //打开RCU读取锁，在此期间无法进行进程切换
 	/*
 	 * C语言中&的作用是获得变量的内存地址，参考[C指针](http://www.runoob.com/cprogramming/c-pointers.html)
 	 */
-	kthreadd_task = find_task_by_pid_ns(pid, &init_pid_ns);// 获取kthreadd的进程描述符，期间需要检索进程pid的使用链表，所以要加锁
+	kthreadd_task = find_task_by_pid_ns(pid, &init_pid_ns);// 获取kthreadd的进程描述符，
+	//期间需要检索进程pid的使用链表，所以要加锁
+
 	rcu_read_unlock(); //关闭RCU读取锁
-	sched_setscheduler_nocheck(kthreadd_task, SCHED_FIFO, &param); //设置kthreadd的进程调度策略，SCHED_FIFO 实时调度策略，即马上调用，先到先服务，param的优先级之前定义为1
-	complete(&kthreadd_done); // complete和wait_for_completion是配套的同步机制，跟java的notify和wait差不多，之前kernel_init函数调用了wait_for_completion(&kthreadd_done)，这里调用complete就是通知kernel_init进程kthreadd进程已创建完成，可以继续执行
+	sched_setscheduler_nocheck(kthreadd_task, SCHED_FIFO, &param); //设置kthreadd的进程调度策略，
+	//SCHED_FIFO 实时调度策略，即马上调用，先到先服务，param的优先级之前定义为1
+
+	complete(&kthreadd_done); // complete和wait_for_completion是配套的同步机制，跟java的notify和wait差不多，
+	//之前kernel_init函数调用了wait_for_completion(&kthreadd_done)，
+	//这里调用complete就是通知kernel_init进程kthreadd进程已创建完成，可以继续执行
 
 	/*
 	 * The boot idle thread must execute schedule()
@@ -130,7 +147,9 @@ rest_init的字面意思是剩余的初始化，但是它却一点都不剩余�
  */
 void rcu_scheduler_starting(void)
 {
-	WARN_ON(num_online_cpus() != 1); //WARN_ON相当于警告，会打印出当前栈信息，不会重启， num_online_cpus表示当前启动的cpu数
+	WARN_ON(num_online_cpus() != 1); //WARN_ON相当于警告，会打印出当前栈信息，不会重启，
+	//num_online_cpus表示当前启动的cpu数
+
 	WARN_ON(nr_context_switches() > 0); // nr_context_switches 进行进程切换的次数
 	rcu_scheduler_active = 1; //启用rcu机制
 }
@@ -144,9 +163,10 @@ void rcu_scheduler_starting(void)
  */
  
 /*
- * C语言中 int (*fn)(void *)表示函数指针的定义，int是返回值，void是函数的参数，fn是名字
- * C语言中 * 表示指针，这个用法很多
- * unsigned表示无符号，一般与long,int,char等结合使用，表示范围只有正数，比如init表示范围-2147483648～2147483647 ，那unsigned表示范围0～4294967295，足足多了一倍
+ * 1.C语言中 int (*fn)(void *)表示函数指针的定义，int是返回值，void是函数的参数，fn是名字
+ * 2.C语言中 * 表示指针，这个用法很多
+ * 3.unsigned表示无符号，一般与long,int,char等结合使用，表示范围只有正数，
+ * 比如init表示范围-2147483648～2147483647 ，那unsigned表示范围0～4294967295，足足多了一倍
  */
 pid_t kernel_thread(int (*fn)(void *), void *arg, unsigned long flags)
 {
@@ -345,8 +365,9 @@ void cpu_startup_entry(enum cpuhp_state state)
 	 
 	 
 	 /*
-	  * C语言中#ifdef和#else、#endif是条件编译语句，也就是说在满足某些条件的时候，夹在这几个关键字中间的代码才编译，不满足就不编译
-	  * 下面这句话的意思就是如果定义了CONFIG_X86这个宏，就把boot_init_stack_canary这个代码编译进去
+	  * 1.C语言中#ifdef和#else、#endif是条件编译语句，也就是说在满足某些条件的时候，
+	  * 夹在这几个关键字中间的代码才编译，不满足就不编译
+	  * 2.下面这句话的意思就是如果定义了CONFIG_X86这个宏，就把boot_init_stack_canary这个代码编译进去
 	  */
 #ifdef CONFIG_X86
 	/*
@@ -450,7 +471,9 @@ int kthreadd(void *unused)
 	current->flags |= PF_NOFREEZE;
 
 	for (;;) {
-		set_current_state(TASK_INTERRUPTIBLE); //首先将线程状态设置为 TASK_INTERRUPTIBLE, 如果当前没有要创建的线程则主动放弃 CPU 完成调度.此进程变为阻塞态
+		set_current_state(TASK_INTERRUPTIBLE); //首先将线程状态设置为 TASK_INTERRUPTIBLE,
+		//如果当前没有要创建的线程则主动放弃 CPU 完成调度.此进程变为阻塞态
+
 		if (list_empty(&kthread_create_list)) //  没有需要创建的内核线程
 			schedule(); //   执行一次调度, 让出CPU
 		__set_current_state(TASK_RUNNING);//  运行到此表示 kthreadd 线程被唤醒(就是我们当前),设置进程运行状态为 TASK_RUNNING
@@ -459,7 +482,9 @@ int kthreadd(void *unused)
 			struct kthread_create_info *create;
 
 			create = list_entry(kthread_create_list.next,
-					    struct kthread_create_info, list); //kthread_create_list是一个链表，从链表中取出下一个要创建的kthread_create_info,即线程创建信息
+					    struct kthread_create_info, list); //kthread_create_list是一个链表，
+					    //从链表中取出下一个要创建的kthread_create_info,即线程创建信息
+
 			list_del_init(&create->list); //删除create中的list
 			spin_unlock(&kthread_create_lock); //解锁
 
@@ -608,7 +633,10 @@ struct task_struct *kthread_create_on_node(int (*threadfn)(void *data),
 		 * root may have changed our (kthreadd's) priority or CPU mask.
 		 * The kernel thread should not inherit these properties.
 		 */
-		sched_setscheduler_nocheck(create.result, SCHED_NORMAL, &param);  //create.result类型为task_struct，该函数作用是设置新线程调度策略，SCHED_NORMAL 普通调度策略，非实时，优先级低于实时调度策略SCHED_FIFO和SCHED_RR，param的优先级上面定义为0
+		sched_setscheduler_nocheck(create.result, SCHED_NORMAL, &param);  //create.result类型为task_struct，
+		//该函数作用是设置新线程调度策略，SCHED_NORMAL 普通调度策略，非实时，
+		//优先级低于实时调度策略SCHED_FIFO和SCHED_RR，param的优先级上面定义为0
+
 		set_cpus_allowed_ptr(create.result, cpu_all_mask); //允许新线程在任意CPU上运行
 	}
 	return create.result;
@@ -678,7 +706,9 @@ static int __ref kernel_init(void *unused)
 		pr_err("Failed to execute %s.  Attempting defaults...\n",
 			execute_command);
 	}
-	if (!run_init_process("/sbin/init") || //如果ramdisk_execute_command和execute_command定义的应用程序都没有找到，就到根目录下找 /sbin/init，/etc/init，/bin/init,/bin/sh 这四个应用程序进行启动
+	if (!run_init_process("/sbin/init") || //如果ramdisk_execute_command和execute_command定义的应用程序都没有找到，
+	//就到根目录下找 /sbin/init，/etc/init，/bin/init,/bin/sh 这四个应用程序进行启动
+
 	    !run_init_process("/etc/init") ||
 	    !run_init_process("/bin/init") ||
 	    !run_init_process("/bin/sh"))
@@ -730,7 +760,9 @@ static noinline void __init kernel_init_freeable(void)
 	do_basic_setup();//初始化设备，驱动等，这个方法比较重要，将在下面单独讲
 
 	/* Open the /dev/console on the rootfs, this should never fail */
-	if (sys_open((const char __user *) "/dev/console", O_RDWR, 0) < 0) // 打开/dev/console，文件号0，作为init进程标准输入
+	if (sys_open((const char __user *) "/dev/console", O_RDWR, 0) < 0) // 打开/dev/console，
+	//文件号0，作为init进程标准输入
+
 		pr_err("Warning: unable to open an initial console.\n");
 
 	(void) sys_dup(0);// 标准输入
@@ -743,7 +775,9 @@ static noinline void __init kernel_init_freeable(void)
 	if (!ramdisk_execute_command)  //如果 ramdisk_execute_command 没有赋值，则赋值为"/init"，之前有讲到
 		ramdisk_execute_command = "/init";
 
-	if (sys_access((const char __user *) ramdisk_execute_command, 0) != 0) { // 尝试进入ramdisk_execute_command指向的文件，如果失败则重新挂载根文件系统
+	if (sys_access((const char __user *) ramdisk_execute_command, 0) != 0) {
+	// 尝试进入ramdisk_execute_command指向的文件，如果失败则重新挂载根文件系统
+
 		ramdisk_execute_command = NULL;
 		prepare_namespace();
 	}
@@ -785,7 +819,9 @@ static void __init do_basic_setup(void)
 	init_irq_proc();//创建/proc/irq目录, 并初始化系统中所有中断对应的子目录
 	do_ctors();// 执行内核的构造函数
 	usermodehelper_enable();// 启用usermodehelper
-	do_initcalls();//遍历initcall_levels数组，调用里面的initcall函数，这里主要是对设备、驱动、文件系统进行初始化，之所有将函数封装到数组进行遍历，主要是为了好扩展
+	do_initcalls();//遍历initcall_levels数组，调用里面的initcall函数，这里主要是对设备、驱动、文件系统进行初始化，
+	//之所有将函数封装到数组进行遍历，主要是为了好扩展
+
 	random_int_secret_init();//初始化随机数生成池
 }
 ```
@@ -812,7 +848,9 @@ void __init driver_init(void)
 	/* These are also core pieces, but must come after the
 	 * core core pieces.
 	 */
-	platform_bus_init();// 初始化驱动模型中的bus/platform子系统,这个节点是所有platform设备和驱动的总线类型，即所有platform设备和驱动都会挂载到这个总线上
+	platform_bus_init();// 初始化驱动模型中的bus/platform子系统,这个节点是所有platform设备和驱动的总线类型，
+	//即所有platform设备和驱动都会挂载到这个总线上
+
 	cpu_dev_init(); // 初始化驱动模型中的devices/system/cpu子系统,该节点包含CPU相关的属性
 	memory_dev_init();//初始化驱动模型中的/devices/system/memory子系统,该节点包含了内存相关的属性，如块大小等
 }
