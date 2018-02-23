@@ -96,7 +96,7 @@ Source Insight的好处：
 ![](http://upload-images.jianshu.io/upload_images/3387045-0a23a2fc65603414.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
 
 
-还有一些快捷键，比如Ctrl+左键可以方法跳转，左上角有前进和后退，Ctrl+G 是跳转到指定行，Ctrl+F 搜索内容，有时我们会遇到方法无法跳转，这时我们需要点击Project，选择Synchronize Files,全局关联一下，如图
+还有一些快捷键，比如Ctrl+左键可以方法跳转，Alt+,是后退，Alt+.是前进，Ctrl+G 是跳转到指定行，Ctrl+F 搜索内容，有时我们会遇到方法无法跳转，这时我们需要点击Project，选择Synchronize Files,全局关联一下，如图
 
 ![](http://upload-images.jianshu.io/upload_images/3387045-86700d6d78a03c6c.gif?imageMogr2/auto-orient/strip)
 
