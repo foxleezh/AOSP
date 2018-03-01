@@ -596,7 +596,7 @@ void KernelLogger(android::base::LogId, android::base::LogSeverity severity,
   iov[0].iov_base = buf;
   iov[0].iov_len = size;
   TEMP_FAILURE_RETRY(writev(klog_fd, iov, 1));//将日志写入到 /dev/kmsg 中
-} 
+} 
 
 ```
 
@@ -625,7 +625,7 @@ bool DoFirstStageMount() {
         return false;
     }
     return handle->DoFirstStageMount(); //主要是初始化特定设备并挂载
-} 
+} 
 ```
 
 ### 3.4 handle->DoFirstStageMount
@@ -648,7 +648,7 @@ FirstStageMount::FirstStageMount()
             mount_fstab_recs_.push_back(fstab_rec);//将挂载信息放入数组中存起来
         }
     }
-} 
+} 
 ```
 
 ## 四、启用SELinux安全策略
@@ -725,7 +725,7 @@ static void selinux_initialize(bool in_kernel_domain) {
     } else {
         selinux_init_all_handles(); //第二阶段时初始化处理函数
     }
-} 
+} 
 ```
 
 ### 4.2 selinux_set_callback
@@ -754,25 +754,25 @@ void selinux_set_callback(int type, union selinux_callback cb)
 		selinux_netlink_policyload = cb.func_policyload;
 		break;
 	}
-} 
+} 
 ```
 ### 4.3 selinux_load_policy
 
 定义在platform/system/core/init/init.cpp
 
-这里区分了两种情况,这两种情况只是区分从哪里加载安全策略文件,第一个是从 /vendor/etc/selinux/precompiled_sepolicy  读取
+这里区分了两种情况,这两种情况只是区分从哪里加载安全策略文件,第一个是从 /vendor/etc/selinux/precompiled_sepolicy  读取
 ,第二个是从 /sepolicy 读取,他们最终都是调用selinux_android_load_policy_from_fd方法
 
 ```C
 static bool selinux_load_policy() {
     return selinux_is_split_policy_device() ? selinux_load_split_policy()
                                             : selinux_load_monolithic_policy();
-} 
+} 
 ```
 ### 4.4 selinux_android_load_policy_from_fd
 定义在platform/external/selinux/libselinux/src/android/android.c
 
-这个函数主要作用是设置selinux_mnt 的值为/sys/fs/selinux ,然后调用security_load_policy
+这个函数主要作用是设置selinux_mnt 的值为/sys/fs/selinux ,然后调用security_load_policy
 
 ```C
 int selinux_android_load_policy_from_fd(int fd, const char *description)
@@ -793,7 +793,7 @@ int selinux_android_load_policy_from_fd(int fd, const char *description)
 	  return 0;
 	}
 
-	set_selinuxmnt(SELINUXMNT); //SELINUXMNT的值为 /sys/fs/selinux 
+	set_selinuxmnt(SELINUXMNT); //SELINUXMNT的值为 /sys/fs/selinux 
 	if (fstat(fd, &sb) < 0) {
 		selinux_log(SELINUX_ERROR, "SELinux:  Could not stat %s:  %s\n",
 				description, strerror(errno));
@@ -821,7 +821,7 @@ int selinux_android_load_policy_from_fd(int fd, const char *description)
 	selinux_log(SELINUX_INFO, "SELinux: Loaded policy from %s\n", description);
 	load_successful = 1;
 	return 0;
-} 
+} 
 ```
 
 ### 4.5 security_load_policy
@@ -851,7 +851,7 @@ int security_load_policy(void *data, size_t len)
 	if (ret < 0)
 		return -1;
 	return 0;
-} 
+} 
 ```
 
 ### 4.6 security_setenforce
@@ -888,7 +888,7 @@ int security_setenforce(int value)
 		return -1;
 
 	return 0;
-} 
+} 
 ```
 
 
