@@ -1,23 +1,30 @@
 ## 前言
-上一篇中讲到，Linux系统执行完初始化操作最后会执行根目录下的init文件，init是一个可执行程序，它的源码在platform/system/core/init/init.cpp，本篇主要讲init进程相关的一些东西,主要讲解以下内容
+上一篇中讲到，Linux系统执行完初始化操作最后会执行根目录下的init文件，init是一个可执行程序，
+它的源码在platform/system/core/init/init.cpp。
+之前我们讲过init进程是用户空间的第一个进程,我们熟悉的app应用程序都是以它为父进程的,
+init进程入口函数是main函数,这个函数做的事情还是比较多的，主要分为三个部分
 
 - init进程第一阶段
 - init进程第二阶段
 - init.rc文件解析
 
+由于内容比较多，所以对于init的讲解，我分为三个章节来讲，本文只讲解第一阶段，第一阶段主要有以下内容
+
+- ueventd/watchdogd跳转及环境变量设置
+- 挂载文件系统并创建目录
+- 初始化日志输出、挂载分区设备
 
 本文涉及到的文件
 ```
 platform/system/core/init/init.cpp
+platform/system/core/init/ueventd.cpp
+platform/system/core/init/watchdogd.cpp
 platform/system/core/init/log.cpp
+platform/system/core/base/logging.cpp
+platform/system/core/init/init_first_stage.cpp
 ```
 
-## 一、init进程第一阶段
-
-之前我们讲过init进程是用户空间的第一个进程,我们熟悉的app应用程序都是以它为父进程的,init进程入口函数是main函数,我们先看看第一阶段做了些什么
-
-### 1.1 ueventd/watchdogd跳转及环境变量设置
-
+## 一、ueventd/watchdogd跳转及环境变量设置
 
 ```C
 /*
@@ -50,13 +57,16 @@ int main(int argc, char** argv) {
 
 ```
 
-#### 1.1.1 ueventd_main
+### 1.1 ueventd_main
 定义在platform/system/core/init/ueventd.cpp
 
 Android根文件系统的映像中不存在“/dev”目录，该目录是init进程启动后动态创建的。
+
 因此，建立Android中设备节点文件的重任，也落在了init进程身上。为此，init进程创建子进程ueventd，并将创建设备节点文件的工作托付给ueventd。
 ueventd通过两种方式创建设备节点文件。
+
 第一种方式对应“冷插拔”（Cold Plug），即以预先定义的设备信息为基础，当ueventd启动后，统一创建设备节点文件。这一类设备节点文件也被称为静态节点文件。
+
 第二种方式对应“热插拔”（Hot Plug），即在系统运行中，当有设备插入USB端口时，ueventd就会接收到这一事件，为插入的设备动态创建设备节点文件。这一类设备节点文件也被称为动态节点文件。
 
 ```C
@@ -120,12 +130,13 @@ int ueventd_main(int argc, char **argv)
 
 ```
 
-#### 1.1.2 watchdogd_main
+### 1.2 watchdogd_main
 定义在platform/system/core/init/watchdogd.cpp
 
-"看门狗"本身是一个定时器电路，内部会不断的进行计时（或计数）操作
-计算机系统和"看门狗"有两个引脚相连接，正常运行时每隔一段时间就会通过其中一个引脚向"看门狗"发送信号，"看门狗"接收到信号后会将计时器清零并重新开始计时
-而一旦系统出现问题，进入死循环或任何阻塞状态，不能及时发送信号让"看门狗"的计时器清零，当计时结束时，"看门狗"就会通过另一个引脚向系统发送“复位信号”，让系统重启
+"看门狗"本身是一个定时器电路，内部会不断的进行计时（或计数）操作,计算机系统和"看门狗"有两个引脚相连接，
+正常运行时每隔一段时间就会通过其中一个引脚向"看门狗"发送信号，"看门狗"接收到信号后会将计时器清零并重新开始计时,
+而一旦系统出现问题，进入死循环或任何阻塞状态，不能及时发送信号让"看门狗"的计时器清零，当计时结束时，
+"看门狗"就会通过另一个引脚向系统发送“复位信号”，让系统重启
 
 watchdogd_main主要是定时器作用,而DEV_NAME就是那个引脚
 ```C
@@ -178,7 +189,7 @@ int watchdogd_main(int argc, char **argv) {
     }
 }
 ```
-#### 1.1.3 install_reboot_signal_handlers
+### 1.3 install_reboot_signal_handlers
 定义在platform/system/core/init/init.cpp
 
 这个函数主要作用将各种信号量，如SIGABRT,SIGBUS等的行为设置为SA_RESTART,一旦监听到这些信号即执行重启系统
@@ -210,7 +221,7 @@ static void install_reboot_signal_handlers() {
 }
 ```
 
-#### 1.1.4 add_environment
+### 1.4 add_environment
 定义在platform/system/core/init/init.cpp
 
 这个函数主要作用是将一个键值对放到一个Char数组中,如果数组中有key就替换,没有就插入,跟Java中的Map差不多
@@ -252,7 +263,7 @@ int add_environment(const char *key, const char *val)
 }
 ```
 
-### 1.2 挂载文件系统并创建目录
+### 二、 挂载文件系统并创建目录
 
 
 ```C
@@ -298,16 +309,20 @@ int add_environment(const char *key, const char *val)
 
 ```
 
-#### 1.2.1 mount
+### 2.1 mount
 mount是用来挂载文件系统的，mount属于Linux系统调用
 ```C
 int mount(const char *source, const char *target, const char *filesystemtype,
 unsigned long mountflags, const void *data);
 ```
 参数：
+
 source：将要挂上的文件系统，通常是一个设备名。
+
 target：文件系统所要挂载的目标目录。
+
 filesystemtype：文件系统的类型，可以是"ext2"，"msdos"，"proc"，"ntfs"，"iso9660"。。。
+
 mountflags：指定文件系统的读写访问标志，可能值有以下
 
 |参数|含义|
@@ -347,7 +362,7 @@ proc文件系统是一个非常重要的虚拟文件系统，它可以看作是�
 与proc文件系统类似，sysfs文件系统也是一个不占有任何磁盘空间的虚拟文件系统。
 它通常被挂接在/sys目录下。sysfs文件系统是Linux2.6内核引入的，
 它把连接在系统上的设备和总线组织成为一个分级的文件，使得它们可以在用户空间存取
-#### 1.2.2 mknod
+### 2.2 mknod
 mknod用于创建Linux中的设备文件
 ```
 int mknod(const char* path, mode_t mode, dev_t dev) {
@@ -372,29 +387,36 @@ mode：指定设备的类型和读写访问标志
 |S_IFLNK  |symbolic link 链接文件|
 
 dev 表示设备，由makedev(1, 9) 函数创建，9为主设备号、1为次设备号
-#### 1.2.3 其他命令
+### 2.3 其他命令
 
 mkdir也是Linux系统调用，作用是创建目录，第一个参数是目录路径，第二个是读写权限
+
 chmod用于修改文件/目录的读写权限
+
 setgroups 用来将list 数组中所标明的组加入到目前进程的组设置中
 
 这里我解释下文件的权限，也就是类似0755这种，要理解权限首先要明白「用户和组」的概念
+
 Linux系统可以有多个用户，多个用户可以属于同一个组，用户和组的概念就像我们人和家庭一样，人属于家庭的一分子，用户属于一个组，我们一般在Linux终端输入ls -al之后会有如下结果
 ```
 drwxr-xr-x  7 foxleezh foxleezh   4096 2月  24 14:31 .android
 ```
 第一个foxleezh表示所有者，这里的foxleezh表示一个用户，类似foxleezh这个人
-第二个foxleezh表示文件所有用户组，这里的foxleezh表示一个组，类似foxleezh这个家庭
-然后我们来看下dwxr-xr-x,这个要分成四部分来理解，d表示目录（文件用 - 表示），wxr表示所有者权限，xr表示文件所有用户组的权限，x表示其他用户的权限
-w- 表示写权限，用2表示
-x- 表示执行权限，用1表示
-r- 表示读取权限，用4表示
-那么dwxr-xr-x还有种表示方法就是751，是不是感觉跟0755差不多了，那0755前面那个0表示什么意思呢？
-0755前面的0跟suid和guid有关
-suid意味着其他用户拥有和文件所有者一样的权限，用4表示
-guid意味着其他用户拥有和文件所有用户组一样的权限，用2表示
 
-### 1.3 初始化日志输出、挂载分区设备
+第二个foxleezh表示文件所有用户组，这里的foxleezh表示一个组，类似foxleezh这个家庭
+
+然后我们来看下dwxr-xr-x,这个要分成四部分来理解，d表示目录（文件用 - 表示），wxr表示所有者权限，xr表示文件所有用户组的权限，x表示其他用户的权限
+- w- 表示写权限，用2表示
+- x- 表示执行权限，用1表示
+- r- 表示读取权限，用4表示
+那么dwxr-xr-x还有种表示方法就是751，是不是感觉跟0755差不多了，那0755前面那个0表示什么意思呢？
+
+0755前面的0跟suid和guid有关
+
+- suid意味着其他用户拥有和文件所有者一样的权限，用4表示
+- guid意味着其他用户拥有和文件所有用户组一样的权限，用2表示
+
+### 三、 初始化日志输出、挂载分区设备
 
 
 ```C
@@ -416,10 +438,11 @@ guid意味着其他用户拥有和文件所有用户组一样的权限，用2表
         ...
     }
 ```
-#### 1.3.1 InitKernelLogging
+### 3.1 InitKernelLogging
 定义在platform/system/core/init/log.cpp
 
-InitKernelLogging首先是将标准输入输出重定向到"/sys/fs/selinux/null"，然后设置log日志输出的等级
+InitKernelLogging首先是将标准输入输出重定向到"/sys/fs/selinux/null"，然后调用InitLogging初始化log日志系统
+
 ```C
 void InitKernelLogging(char* argv[]) {
     // Make stdin/stdout/stderr all point to /dev/null.
@@ -442,8 +465,10 @@ void InitKernelLogging(char* argv[]) {
     android::base::InitLogging(argv, &android::base::KernelLogger);//初始化log
 }
 ```
-#### 1.3.1 InitLogging
+### 3.2 InitLogging
 定义在platform/system/core/base/logging.cpp
+
+InitLogging主要工作是设置logger和aborter的处理函数，然后设置日志系统输出等级
 
 ```C
 void InitLogging(char* argv[], LogFunction&& logger, AbortFunction&& aborter) {
@@ -510,7 +535,110 @@ void InitLogging(char* argv[], LogFunction&& logger, AbortFunction&& aborter) {
   }
 }
 ```
+
+### 3.3 KernelLogger
+定义在platform/system/core/base/logging.cpp
+
+在InitKernelLogging方法中有句调用
+```C
+android::base::InitLogging(argv, &android::base::KernelLogger);
 ```
+这句的作用就是将KernelLogger函数作为log日志的处理函数,KernelLogger主要作用就是将要输出的日志格式化之后写入到 /dev/kmsg 设备中
+
+```C
+void KernelLogger(android::base::LogId, android::base::LogSeverity severity,
+                  const char* tag, const char*, unsigned int, const char* msg) {
+  // clang-format off
+  static constexpr int kLogSeverityToKernelLogLevel[] = {
+      [android::base::VERBOSE] = 7,              // KERN_DEBUG (there is no verbose kernel log
+                                                 //             level)
+      [android::base::DEBUG] = 7,                // KERN_DEBUG
+      [android::base::INFO] = 6,                 // KERN_INFO
+      [android::base::WARNING] = 4,              // KERN_WARNING
+      [android::base::ERROR] = 3,                // KERN_ERROR
+      [android::base::FATAL_WITHOUT_ABORT] = 2,  // KERN_CRIT
+      [android::base::FATAL] = 2,                // KERN_CRIT
+  };
+  // clang-format on
+  static_assert(arraysize(kLogSeverityToKernelLogLevel) == android::base::FATAL + 1,
+                "Mismatch in size of kLogSeverityToKernelLogLevel and values in LogSeverity");
+  //static_assert是编译断言，如果第一个参数为true，那么编译就不通过，这里是判断kLogSeverityToKernelLogLevel数组个数不能大于7
+
+  static int klog_fd = TEMP_FAILURE_RETRY(open("/dev/kmsg", O_WRONLY | O_CLOEXEC)); //打开 /dev/kmsg 文件
+  if (klog_fd == -1) return;
+
+  int level = kLogSeverityToKernelLogLevel[severity];//根据传入的日志等级得到Linux的日志等级，也就是kLogSeverityToKernelLogLevel对应下标的映射
+
+  // The kernel's printk buffer is only 1024 bytes.
+  // TODO: should we automatically break up long lines into multiple lines?
+  // Or we could log but with something like "..." at the end?
+  char buf[1024];
+  size_t size = snprintf(buf, sizeof(buf), "<%d>%s: %s\n", level, tag, msg);//格式化日志输出
+  if (size > sizeof(buf)) {
+    size = snprintf(buf, sizeof(buf), "<%d>%s: %zu-byte message too long for printk\n",
+                    level, tag, size);
+  }
+
+  iovec iov[1];
+  iov[0].iov_base = buf;
+  iov[0].iov_len = size;
+  TEMP_FAILURE_RETRY(writev(klog_fd, iov, 1));//将日志写入到 /dev/kmsg 中
+} 
+
+```
+
+### 3.3 DoFirstStageMount
+定义在platform/system/core/init/init_first_stage.cpp
+
+主要作用是初始化特定设备并挂载
+
+```C
+bool DoFirstStageMount() {
+    // Skips first stage mount if we're in recovery mode.
+    if (IsRecoveryMode()) { //如果是刷机模式，直接跳过挂载
+        LOG(INFO) << "First stage mount skipped (recovery mode)";
+        return true;
+    }
+
+    // Firstly checks if device tree fstab entries are compatible.
+    if (!is_android_dt_value_expected("fstab/compatible", "android,fstab")) { //如果fstab/compatible的值不是android,fstab，直接跳过挂载
+        LOG(INFO) << "First stage mount skipped (missing/incompatible fstab in device tree)";
+        return true;
+    }
+
+    std::unique_ptr<FirstStageMount> handle = FirstStageMount::Create();
+    if (!handle) {
+        LOG(ERROR) << "Failed to create FirstStageMount";
+        return false;
+    }
+    return handle->DoFirstStageMount(); //主要是初始化特定设备并挂载
+} 
+```
+
+### 3.4 handle->DoFirstStageMount()
+
+定义在platform/system/core/init/init_first_stage.cpp
+
+这里主要作用是去解析"/system", "/vendor", "/odm"三个目录
+
+```C
+FirstStageMount::FirstStageMount()
+    : need_dm_verity_(false), device_tree_fstab_(fs_mgr_read_fstab_dt(), fs_mgr_free_fstab) {
+    if (!device_tree_fstab_) {
+        LOG(ERROR) << "Failed to read fstab from device tree";
+        return;
+    }
+    for (auto mount_point : {"/system", "/vendor", "/odm"}) {
+        fstab_rec* fstab_rec =
+            fs_mgr_get_entry_for_mount_point(device_tree_fstab_.get(), mount_point); //这里主要是把挂载的信息解析出来
+        if (fstab_rec != nullptr) {
+            mount_fstab_recs_.push_back(fstab_rec);//将挂载信息放入数组中存起来
+        }
+    }
+} 
+```
+
+```C
  if (is_first_stage) {
 
           ...
@@ -540,7 +668,7 @@ void InitLogging(char* argv[], LogFunction&& logger, AbortFunction&& aborter) {
     }
 ```
 
-```
+```C
  if (is_first_stage) {
 
           ...
@@ -563,7 +691,7 @@ void InitLogging(char* argv[], LogFunction&& logger, AbortFunction&& aborter) {
 ```
 
 
-```
+```C
 int main(int argc, char** argv) {
 
     ...
@@ -635,7 +763,7 @@ int main(int argc, char** argv) {
 ```
 
 
-```
+```C
 int main(int argc, char** argv) {
 
     ...
