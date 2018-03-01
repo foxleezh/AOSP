@@ -13,6 +13,8 @@ init进程入口函数是main函数,这个函数做的事情还是比较多的�
 - ueventd/watchdogd跳转及环境变量设置
 - 挂载文件系统并创建目录
 - 初始化日志输出、挂载分区设备
+- 启用SELinux安全策略
+- 开始第二阶段前的准备
 
 本文涉及到的文件
 ```
@@ -22,6 +24,11 @@ platform/system/core/init/watchdogd.cpp
 platform/system/core/init/log.cpp
 platform/system/core/base/logging.cpp
 platform/system/core/init/init_first_stage.cpp
+platform/external/selinux/libselinux/src/callbacks.c
+platform/external/selinux/libselinux/src/load_policy.c
+platform/external/selinux/libselinux/src/getenforce.c
+platform/external/selinux/libselinux/src/setenforce.c
+platform/external/selinux/libselinux/src/android/android.c
 ```
 
 ## 一、ueventd/watchdogd跳转及环境变量设置
@@ -94,7 +101,7 @@ int ueventd_main(int argc, char **argv)
     cb.func_log = selinux_klog_callback;
     selinux_set_callback(SELINUX_CB_LOG, cb);//注册selinux相关的用于打印log的回调函数
 
-    ueventd_parse_config_file("/ueventd.rc"); //解析.rc文件,这个后文再讲
+    ueventd_parse_config_file("/ueventd.rc"); //解析.rc文件,这个后续再讲
     ueventd_parse_config_file("/vendor/ueventd.rc");
     ueventd_parse_config_file("/odm/ueventd.rc");
 
@@ -139,6 +146,7 @@ int ueventd_main(int argc, char **argv)
 "看门狗"就会通过另一个引脚向系统发送“复位信号”，让系统重启
 
 watchdogd_main主要是定时器作用,而DEV_NAME就是那个引脚
+
 ```C
 int watchdogd_main(int argc, char **argv) {
     InitKernelLogging(argv);
@@ -265,7 +273,6 @@ int add_environment(const char *key, const char *val)
 
 ### 二、 挂载文件系统并创建目录
 
-
 ```C
 
     bool is_first_stage = (getenv("INIT_SECOND_STAGE") == nullptr);//查看是否有环境变量INIT_SECOND_STAGE
@@ -344,7 +351,7 @@ mountflags：指定文件系统的读写访问标志，可能值有以下
 
 data：文件系统特有的参数
 
-在init初始化过程中，Android分别挂载了tmpfs，devpts，proc，sysfs这4类文件系统。
+在init初始化过程中，Android分别挂载了tmpfs，devpts，proc，sysfs,selinuxfs这5类文件系统。
 
 tmpfs是一种虚拟内存文件系统，它会将所有的文件存储在虚拟内存中，
 如果你将tmpfs文件系统卸载后，那么其下的所有的内容将不复存在。
@@ -362,9 +369,13 @@ proc文件系统是一个非常重要的虚拟文件系统，它可以看作是�
 与proc文件系统类似，sysfs文件系统也是一个不占有任何磁盘空间的虚拟文件系统。
 它通常被挂接在/sys目录下。sysfs文件系统是Linux2.6内核引入的，
 它把连接在系统上的设备和总线组织成为一个分级的文件，使得它们可以在用户空间存取
+
+selinuxfs也是虚拟文件系统,通常挂载在/sys/fs/selinux目录下,用来存放SELinux安全策略文件
+
 ### 2.2 mknod
 mknod用于创建Linux中的设备文件
-```
+
+```C
 int mknod(const char* path, mode_t mode, dev_t dev) {
 
 }
@@ -420,7 +431,7 @@ drwxr-xr-x  7 foxleezh foxleezh   4096 2月  24 14:31 .android
 
 
 ```C
- if (is_first_stage) {
+if (is_first_stage) {
 
           ...
 
@@ -540,9 +551,11 @@ void InitLogging(char* argv[], LogFunction&& logger, AbortFunction&& aborter) {
 定义在platform/system/core/base/logging.cpp
 
 在InitKernelLogging方法中有句调用
+
 ```C
 android::base::InitLogging(argv, &android::base::KernelLogger);
 ```
+
 这句的作用就是将KernelLogger函数作为log日志的处理函数,KernelLogger主要作用就是将要输出的日志格式化之后写入到 /dev/kmsg 设备中
 
 ```C
@@ -615,11 +628,11 @@ bool DoFirstStageMount() {
 } 
 ```
 
-### 3.4 handle->DoFirstStageMount()
+### 3.4 handle->DoFirstStageMount
 
 定义在platform/system/core/init/init_first_stage.cpp
 
-这里主要作用是去解析"/system", "/vendor", "/odm"三个目录
+这里主要作用是去解析/proc/device-tree/firmware/android/fstab,然后得到"/system", "/vendor", "/odm"三个目录的挂载信息
 
 ```C
 FirstStageMount::FirstStageMount()
@@ -638,18 +651,25 @@ FirstStageMount::FirstStageMount()
 } 
 ```
 
+## 四、启用SELinux安全策略
+
+SELinux是「Security-Enhanced Linux」的简称，是美国国家安全局「NSA=The National Security Agency」
+和SCC（Secure Computing Corporation）开发的 Linux的一个扩张强制访问控制安全模块。
+在这种访问控制体系的限制下，进程只能访问那些在他的任务中所需要文件
+
 ```C
- if (is_first_stage) {
+if (is_first_stage) {
 
           ...
-
-        SetInitAvbVersionInRecovery();
+          
+        //Avb即Android Verfied boot,功能包括Secure Boot, verfying boot 和 dm-verity, 
+        //原理都是对二进制文件进行签名，在系统启动时进行认证，确保系统运行的是合法的二进制镜像文件。
+        //其中认证的范围涵盖：bootloader，boot.img，system.img
+        SetInitAvbVersionInRecovery();//在刷机模式下初始化avb的版本,不是刷机模式直接跳过
 
         // Set up SELinux, loading the SELinux policy.
         selinux_initialize(true);//加载SELinux policy，也就是安全策略，
-        //SELinux是「Security-Enhanced Linux」的简称，是美国国家安全局「NSA=The National Security Agency」
-        //和SCC（Secure Computing Corporation）开发的 Linux的一个扩张强制访问控制安全模块。
-        //在这种访问控制体系的限制下，进程只能访问那些在他的任务中所需要文件
+        
 
         // We're in the kernel domain, so re-exec init to transition to the init domain now
         // that the SELinux policy has been loaded.
@@ -661,15 +681,223 @@ FirstStageMount::FirstStageMount()
          */
         if (restorecon("/init") == -1) { //restorecon命令用来恢复SELinux文件属性即恢复文件的安全上下文
             PLOG(ERROR) << "restorecon failed";
-            security_failure();
+            security_failure(); //失败则重启系统
         }
 
         ...
     }
 ```
 
+### 4.1 selinux_initialize
+定义在platform/system/core/init/init.cpp
+
 ```C
- if (is_first_stage) {
+static void selinux_initialize(bool in_kernel_domain) {
+    Timer t;
+
+    selinux_callback cb;
+    cb.func_log = selinux_klog_callback;
+    selinux_set_callback(SELINUX_CB_LOG, cb); //设置selinux的日志输出处理函数
+    cb.func_audit = audit_callback;
+    selinux_set_callback(SELINUX_CB_AUDIT, cb);//设置selinux的记录权限检测的处理函数
+
+    if (in_kernel_domain) {//这里是分了两个阶段,第一阶段in_kernel_domain为true,第二阶段为false
+        LOG(INFO) << "Loading SELinux policy";
+        if (!selinux_load_policy()) {  //加载selinux的安全策略
+            panic();
+        }
+
+        bool kernel_enforcing = (security_getenforce() == 1); //获取当前kernel的工作模式
+        bool is_enforcing = selinux_is_enforcing(); //获取工作模式的配置
+        if (kernel_enforcing != is_enforcing) { //如果当前的工作模式与配置的不同,就将当前的工作模式改掉
+            if (security_setenforce(is_enforcing)) {
+                PLOG(ERROR) << "security_setenforce(%s) failed" << (is_enforcing ? "true" : "false");
+                security_failure();
+            }
+        }
+
+        if (!write_file("/sys/fs/selinux/checkreqprot", "0")) {
+            security_failure();
+        }
+
+        // init's first stage can't set properties, so pass the time to the second stage.
+        setenv("INIT_SELINUX_TOOK", std::to_string(t.duration_ms()).c_str(), 1);
+    } else {
+        selinux_init_all_handles(); //第二阶段时初始化处理函数
+    }
+} 
+```
+
+### 4.2 selinux_set_callback
+
+定义在platform/external/selinux/libselinux/src/callbacks.c
+
+主要就是根据不同的type设置回调函数,selinux_log,selinux_audit这些都死函数指针
+
+```C
+void selinux_set_callback(int type, union selinux_callback cb)
+{
+	switch (type) {
+	case SELINUX_CB_LOG:
+		selinux_log = cb.func_log;
+		break;
+	case SELINUX_CB_AUDIT:
+		selinux_audit = cb.func_audit;
+		break;
+	case SELINUX_CB_VALIDATE:
+		selinux_validate = cb.func_validate;
+		break;
+	case SELINUX_CB_SETENFORCE:
+		selinux_netlink_setenforce = cb.func_setenforce;
+		break;
+	case SELINUX_CB_POLICYLOAD:
+		selinux_netlink_policyload = cb.func_policyload;
+		break;
+	}
+} 
+```
+### 4.3 selinux_load_policy
+
+定义在platform/system/core/init/init.cpp
+
+这里区分了两种情况,这两种情况只是区分从哪里加载安全策略文件,第一个是从 /vendor/etc/selinux/precompiled_sepolicy  读取
+,第二个是从 /sepolicy 读取,他们最终都是调用selinux_android_load_policy_from_fd方法
+
+```C
+static bool selinux_load_policy() {
+    return selinux_is_split_policy_device() ? selinux_load_split_policy()
+                                            : selinux_load_monolithic_policy();
+} 
+```
+### 4.4 selinux_android_load_policy_from_fd
+定义在platform/external/selinux/libselinux/src/android/android.c
+
+这个函数主要作用是设置selinux_mnt 的值为/sys/fs/selinux ,然后调用security_load_policy
+
+```C
+int selinux_android_load_policy_from_fd(int fd, const char *description)
+{
+	int rc;
+	struct stat sb;
+	void *map = NULL;
+	static int load_successful = 0;
+
+	/*
+	 * Since updating policy at runtime has been abolished
+	 * we just check whether a policy has been loaded before
+	 * and return if this is the case.
+	 * There is no point in reloading policy.
+	 */
+	if (load_successful){
+	  selinux_log(SELINUX_WARNING, "SELinux: Attempted reload of SELinux policy!/n");
+	  return 0;
+	}
+
+	set_selinuxmnt(SELINUXMNT); //SELINUXMNT的值为 /sys/fs/selinux 
+	if (fstat(fd, &sb) < 0) {
+		selinux_log(SELINUX_ERROR, "SELinux:  Could not stat %s:  %s\n",
+				description, strerror(errno));
+		return -1;
+	}
+	/*
+	 * mmap 的作用是将一个文件或者其它对象映射进内存
+	 */
+	map = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0); 
+	if (map == MAP_FAILED) {
+		selinux_log(SELINUX_ERROR, "SELinux:  Could not map %s:  %s\n",
+				description, strerror(errno));
+		return -1;
+	}
+
+	rc = security_load_policy(map, sb.st_size);
+	if (rc < 0) {
+		selinux_log(SELINUX_ERROR, "SELinux:  Could not load policy:  %s\n",
+				strerror(errno));
+		munmap(map, sb.st_size);
+		return -1;
+	}
+
+	munmap(map, sb.st_size);
+	selinux_log(SELINUX_INFO, "SELinux: Loaded policy from %s\n", description);
+	load_successful = 1;
+	return 0;
+} 
+```
+
+### 4.5 security_load_policy
+定义在platform/external/selinux/libselinux/src/load_policy.c
+
+这个函数主要作用就是写入data到/sys/fs/selinux,data其实就是之前找的那些策略文件,由此我们知道,看起来selinux_load_policy调用这么多代码,
+其实只是将策略文件拷贝到 /sys/fs/selinux 目录下
+
+```C
+int security_load_policy(void *data, size_t len)
+{
+	char path[PATH_MAX];
+	int fd, ret;
+
+	if (!selinux_mnt) { //selinux_mnt的值为 /sys/fs/selinux 
+		errno = ENOENT;
+		return -1;
+	}
+
+	snprintf(path, sizeof path, "%s/load", selinux_mnt);
+	fd = open(path, O_RDWR); //打开 /sys/fs/selinux ,然后将data的值写入
+	if (fd < 0)
+		return -1;
+
+	ret = write(fd, data, len);
+	close(fd);
+	if (ret < 0)
+		return -1;
+	return 0;
+} 
+```
+
+### 4.6 security_setenforce
+定义在platform/external/selinux/libselinux/src/setenforce.c
+
+selinux有两种工作模式：
+
+- permissive，所有的操作都被允许（即没有MAC），但是如果违反权限的话，会记录日志,一般eng模式用
+- enforcing，所有操作都会进行权限检查。一般user和user-debug模式用
+
+不管是security_setenforce还是security_getenforce都是去操作/sys/fs/selinux/enforce 文件, 0表示permissive 1表示enforcing
+
+```C
+int security_setenforce(int value)
+{
+	int fd, ret;
+	char path[PATH_MAX];
+	char buf[20];
+
+	if (!selinux_mnt) {
+		errno = ENOENT;
+		return -1;
+	}
+
+	snprintf(path, sizeof path, "%s/enforce", selinux_mnt);
+	fd = open(path, O_RDWR); //打开 /sys/fs/selinux/enforce 文件
+	if (fd < 0)
+		return -1;
+
+	snprintf(buf, sizeof buf, "%d", value);
+	ret = write(fd, buf, strlen(buf)); //将value的值写入文件
+	close(fd);
+	if (ret < 0)
+		return -1;
+
+	return 0;
+} 
+```
+
+
+## 五、开始第二阶段前的准备
+
+这里主要就是设置一些变量如INIT_SECOND_STAGE,INIT_STARTED_AT,为第二阶段做准备,然后再次调用init的main函数，启动用户态的init进程
+
+```C
+if (is_first_stage) {
 
           ...
 
@@ -690,183 +918,7 @@ FirstStageMount::FirstStageMount()
     }
 ```
 
+**小结**
 
-```C
-int main(int argc, char** argv) {
+init进程第一阶段做的主要工作是挂载分区,创建设备节点和一些关键目录,初始化日志输出系统,启用SELinux安全策略
 
-    ...
-
-    // At this point we're in the second stage of init.
-    InitKernelLogging(argv);
-    LOG(INFO) << "init second stage started!";
-
-    // Set up a session keyring that all processes will have access to. It
-    // will hold things like FBE encryption keys. No process should override
-    // its session keyring.
-    keyctl(KEYCTL_GET_KEYRING_ID, KEY_SPEC_SESSION_KEYRING, 1); //初始化进程会话密钥
-
-    // Indicate that booting is in progress to background fw loaders, etc.
-    close(open("/dev/.booting", O_WRONLY | O_CREAT | O_CLOEXEC, 0000));//关闭/dev/.booting文件的相关权限
-
-    property_init();//初始化属性，接下来的一系列操作都是从各个文件读取一些属性，然后通过property_set设置系统属性
-
-    // If arguments are passed both on the command line and in DT,
-    // properties set in DT always have priority over the command-line ones.
-    /*
-     * 1.这句英文的大概意思是，如果参数同时从命令行和DT传过来，DT的优先级总是大于命令行的
-     * 2.DT即device-tree，中文意思是设备树，这里面记录自己的硬件配置和系统运行参数，参考http://www.wowotech.net/linux_kenrel/why-dt.html
-     */
-    process_kernel_dt();//处理DT属性
-    process_kernel_cmdline();//处理命令行属性
-
-    // Propagate the kernel variables to internal variables
-    // used by init as well as the current required properties.
-    export_kernel_boot_props();//处理其他的一些属性
-
-    // Make the time that init started available for bootstat to log.
-    property_set("ro.boottime.init", getenv("INIT_STARTED_AT"));
-    property_set("ro.boottime.init.selinux", getenv("INIT_SELINUX_TOOK"));
-
-    // Set libavb version for Framework-only OTA match in Treble build.
-    const char* avb_version = getenv("INIT_AVB_VERSION");
-    if (avb_version) property_set("ro.boot.avb_version", avb_version);
-
-    // Clean up our environment.
-    unsetenv("INIT_SECOND_STAGE"); //清空这些环境变量，因为之前都已经存入到系统属性中去了
-    unsetenv("INIT_STARTED_AT");
-    unsetenv("INIT_SELINUX_TOOK");
-    unsetenv("INIT_AVB_VERSION");
-
-    // Now set up SELinux for second stage.
-    selinux_initialize(false); //第二阶段初始化SELinux policy
-    selinux_restore_context();
-
-    epoll_fd = epoll_create1(EPOLL_CLOEXEC);//创建epoll实例，并返回epoll的文件描述符
-    //EPOLL类似于POLL，是Linux特有的一种IO多路复用的机制，对于大量的描述符处理，EPOLL更有优势
-    //epoll_create1是epoll_create的升级版，可以动态调整epoll实例中文件描述符的个数
-    //EPOLL_CLOEXEC这个参数是为文件描述符添加O_CLOEXEC属性，参考http://blog.csdn.net/gqtcgq/article/details/48767691
-
-    if (epoll_fd == -1) {
-        PLOG(ERROR) << "epoll_create1 failed";
-        exit(1);
-    }
-
-    signal_handler_init();//主要是创建handler处理子进程终止信号，创建一个匿名socket并注册到epoll进行监听
-
-    property_load_boot_defaults();//从文件中加载一些属性，读取usb配置
-    export_oem_lock_status();//设置ro.boot.flash.locked 属性
-    start_property_service();//开启一个socket监听系统属性的设置
-    set_usb_controller();//设置sys.usb.controller 属性
-
-    ...
-
-```
-
-
-```C
-int main(int argc, char** argv) {
-
-    ...
-
-    const BuiltinFunctionMap function_map;
-    /*
-     * 1.C++中::表示静态方法调用，相当于java中static的方法
-     */
-    Action::set_function_map(&function_map);
-
-
-    Parser& parser = Parser::GetInstance();//设置init.rc的解析器
-	/*
-     * 1.C++中std::make_unique相当于new,它会返回一个std::unique_ptr，即智能指针
-     * 2.unique_ptr持有对对象的独有权，两个unique_ptr不能指向一个对象，不能进行复制操作只能进行移动操作
-     * 3.移动操作的函数是 p1=std::move(p) ,这样指针p指向的对象就移动到p1上了
-     * 4.接下来的这三句代码都是new一个Parser（解析器），然后将它们放到一个map里存起来
-     * 5.ServiceParser、ActionParser、ImportParser分别对应service action import的解析
-     */
-    parser.AddSectionParser("service",std::make_unique<ServiceParser>());
-    parser.AddSectionParser("on", std::make_unique<ActionParser>());
-    parser.AddSectionParser("import", std::make_unique<ImportParser>());
-    std::string bootscript = GetProperty("ro.boot.init_rc", "");
-    if (bootscript.empty()) {//如果ro.boot.init_rc没有对应的值，则解析/init.rc以及/system/etc/init、/vendor/etc/init、/odm/etc/init这三个目录下的.rc文件
-        parser.ParseConfig("/init.rc");
-        parser.set_is_system_etc_init_loaded(
-                parser.ParseConfig("/system/etc/init"));
-        parser.set_is_vendor_etc_init_loaded(
-                parser.ParseConfig("/vendor/etc/init"));
-        parser.set_is_odm_etc_init_loaded(parser.ParseConfig("/odm/etc/init"));
-    } else {//如果ro.boot.init_rc属性有值就解析属性值
-        parser.ParseConfig(bootscript);
-        parser.set_is_system_etc_init_loaded(true);
-        parser.set_is_vendor_etc_init_loaded(true);
-        parser.set_is_odm_etc_init_loaded(true);
-    }
-
-    // Turning this on and letting the INFO logging be discarded adds 0.2s to
-    // Nexus 9 boot time, so it's disabled by default.
-    if (false) parser.DumpState();
-
-    ActionManager& am = ActionManager::GetInstance();
-
-    am.QueueEventTrigger("early-init");//QueueEventTrigger用于触发Action,参数early-init指Action的标记
-
-    // Queue an action that waits for coldboot done so we know ueventd has set up all of /dev...
-    am.QueueBuiltinAction(wait_for_coldboot_done_action, "wait_for_coldboot_done");
-    //QueueBuiltinAction用于添加Action，第一个参数是Action要执行的Command,第二个是Trigger
-
-    // ... so that we can start queuing up actions that require stuff from /dev.
-    am.QueueBuiltinAction(mix_hwrng_into_linux_rng_action, "mix_hwrng_into_linux_rng");
-    am.QueueBuiltinAction(set_mmap_rnd_bits_action, "set_mmap_rnd_bits");
-    am.QueueBuiltinAction(set_kptr_restrict_action, "set_kptr_restrict");
-    am.QueueBuiltinAction(keychord_init_action, "keychord_init");
-    am.QueueBuiltinAction(console_init_action, "console_init");
-
-    // Trigger all the boot actions to get us started.
-    am.QueueEventTrigger("init");
-
-    // Repeat mix_hwrng_into_linux_rng in case /dev/hw_random or /dev/random
-    // wasn't ready immediately after wait_for_coldboot_done
-    am.QueueBuiltinAction(mix_hwrng_into_linux_rng_action, "mix_hwrng_into_linux_rng");
-
-    // Don't mount filesystems or start core system services in charger mode.
-    std::string bootmode = GetProperty("ro.bootmode", "");
-    if (bootmode == "charger") {
-        am.QueueEventTrigger("charger");
-    } else {
-        am.QueueEventTrigger("late-init");
-    }
-
-    // Run all property triggers based on current state of the properties.
-    am.QueueBuiltinAction(queue_property_triggers_action, "queue_property_triggers");
-
-    while (true) {
-        // By default, sleep until something happens.
-        int epoll_timeout_ms = -1;
-
-        if (!(waiting_for_prop || ServiceManager::GetInstance().IsWaitingForExec())) {
-            am.ExecuteOneCommand();
-        }
-        if (!(waiting_for_prop || ServiceManager::GetInstance().IsWaitingForExec())) {
-            restart_processes();
-
-            // If there's a process that needs restarting, wake up in time for that.
-            if (process_needs_restart_at != 0) {
-                epoll_timeout_ms = (process_needs_restart_at - time(nullptr)) * 1000;
-                if (epoll_timeout_ms < 0) epoll_timeout_ms = 0;
-            }
-
-            // If there's more work to do, wake up again immediately.
-            if (am.HasMoreCommands()) epoll_timeout_ms = 0;
-        }
-
-        epoll_event ev;
-        int nr = TEMP_FAILURE_RETRY(epoll_wait(epoll_fd, &ev, 1, epoll_timeout_ms));
-        if (nr == -1) {
-            PLOG(ERROR) << "epoll_wait failed";
-        } else if (nr == 1) {
-            ((void (*)()) ev.data.ptr)();
-        }
-    }
-
-    return 0;
-}
-```
