@@ -732,7 +732,7 @@ static void selinux_initialize(bool in_kernel_domain) {
 
 定义在platform/external/selinux/libselinux/src/callbacks.c
 
-主要就是根据不同的type设置回调函数,selinux_log,selinux_audit这些都死函数指针
+主要就是根据不同的type设置回调函数,selinux_log,selinux_audit这些都是函数指针
 
 ```C
 void selinux_set_callback(int type, union selinux_callback cb)
