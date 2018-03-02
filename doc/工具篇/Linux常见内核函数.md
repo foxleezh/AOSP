@@ -148,3 +148,14 @@ sa_flags 成员用于指定信号处理的行为，它可以是一下值的“�
 | SA_NODEFER| 使对信号的屏蔽无效，即在信号处理函数执行期间仍能发出这个信号|
 | SA_RESETHAND| 信号处理之后重新设置为默认的处理方式|
 | SA_SIGINFO| 使用 sa_sigaction 成员而不是 sa_handler 作为信号处理函数|
+
+## 五、密钥
+
+### 5.1 获取密钥信息
+keyctl(KEYCTL_GET_KEYRING_ID, KEY_SPEC_SESSION_KEYRING, 1)
+
+- KEYCTL_GET_KEYRING_ID 表示通过第二个参数的类型获取当前进程的密钥信息
+- KEY_SPEC_SESSION_KEYRING 表示获取当前进程的SESSION_KEYRING（会话密钥环）
+- 1 表示如果获取不到就新建一个
+
+参考[linux手册](http://www.man7.org/linux/man-pages/man2/keyctl.2.html)
