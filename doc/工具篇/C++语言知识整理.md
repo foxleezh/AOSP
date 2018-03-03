@@ -34,3 +34,33 @@ size_t entry_key_len = strcspn(ENV[n], "=");
 | O_CREAT      |   如果文件不存在就创建一个 |
 | O_CLOEXEC     |  即当调用exec（）函数成功后，文件描述符会自动关闭,且为原子操作。 |
 | O_BINARY     |   以二进制方式打开 |
+
+### 其他
+
+#### 1.模板
+
+模板函数和模板类的定义和使用。用户在程序编译前，只定义了模板函数
+
+```c
+template <typename T, typename T2>
+
+void func(T1 t1, T2 t2){}
+```
+
+
+
+以及模板类
+```C
+template <typename T, typename T2>
+
+class MyTemplateClass
+
+{
+
+。。。
+
+}；
+
+```
+
+我们可以把模板看作Java中的泛型
