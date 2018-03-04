@@ -673,12 +673,11 @@ static void selinux_restore_context() {
 }
 ```
 
+## 三、新建epoll并初始化子进程终止信号处理函数
+
 ```C
    
     epoll_fd = epoll_create1(EPOLL_CLOEXEC);//创建epoll实例，并返回epoll的文件描述符
-    //EPOLL类似于POLL，是Linux特有的一种IO多路复用的机制，对于大量的描述符处理，EPOLL更有优势
-    //epoll_create1是epoll_create的升级版，可以动态调整epoll实例中文件描述符的个数
-    //EPOLL_CLOEXEC这个参数是为文件描述符添加O_CLOEXEC属性，参考http://blog.csdn.net/gqtcgq/article/details/48767691
 
     if (epoll_fd == -1) {
         PLOG(ERROR) << "epoll_create1 failed";
@@ -686,6 +685,91 @@ static void selinux_restore_context() {
     }
 
     signal_handler_init();//主要是创建handler处理子进程终止信号，创建一个匿名socket并注册到epoll进行监听
+
+```
+
+### 3.1 epoll_create1
+EPOLL类似于POLL，是Linux中用来做事件触发的，跟EventBus功能差不多
+
+linux很长的时间都在使用select来做事件触发，它是通过轮询来处理的，轮询的fd数目越多，自然耗时越多，对于大量的描述符处理，EPOLL更有优势
+
+epoll_create1是epoll_create的升级版，可以动态调整epoll实例中文件描述符的个数
+EPOLL_CLOEXEC这个参数是为文件描述符添加O_CLOEXEC属性，参考http://blog.csdn.net/gqtcgq/article/details/48767691
+
+### 3.2 signal_handler_init
+
+这个函数主要的作用是注册SIGCHLD信号的处理函数
+
+init是一个守护进程，为了防止init的子进程成为僵尸进程(zombie process)，
+需要init在子进程在结束时获取子进程的结束码，通过结束码将程序表中的子进程移除，
+防止成为僵尸进程的子进程占用程序表的空间（程序表的空间达到上限时，系统就不能再启动新的进程了，会引起严重的系统问题）
+
+在linux当中，父进程是通过捕捉SIGCHLD信号来得知子进程运行结束的情况，SIGCHLD信号会在子进程终止的时候发出，了解这些背景后，我们来看看init进程如何处理这个信号
+
+首先，调用socketpair,这个方法会返回一对文件描述符，这样当一端写入时，另一端就能被通知到，
+socketpair两端既可以写也可以读，这里只是单向的让s[0]写，s[1]读
+
+然后，新建一个sigaction结构体，sa_handler是信号处理函数，指向SIGCHLD_handler，
+SIGCHLD_handler做的事情就是往s[0]里写个"1"，这样s[1](signal_read_fd)就会收到通知，SA_NOCLDSTOP表示只在子进程终止时处理，
+因为子进程在暂停时也会发出SIGCHLD信号
+
+sigaction(SIGCHLD, &act, 0) 这个是建立信号绑定关系，也就是说当监听到SIGCHLD信号时，由act这个sigaction结构体处理
+
+ReapAnyOutstandingChildren 这个后文讲
+
+最后，register_epoll_handler的作用就是signal_read_fd（之前的s[1]）收到信号，触发handle_signal
+
+终上所述，signal_handler_init函数的作用就是，接收到SIGCHLD信号时触发handle_signal
+
+```C
+void signal_handler_init() {
+    // Create a signalling mechanism for SIGCHLD.
+    int s[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, s) == -1) { //创建socket并返回文件描述符
+        PLOG(ERROR) << "socketpair failed";
+        exit(1);
+    }
+
+    signal_write_fd = s[0];
+    signal_read_fd = s[1];
+
+    // Write to signal_write_fd if we catch SIGCHLD.
+    struct sigaction act;
+    memset(&act, 0, sizeof(act));
+    act.sa_handler = SIGCHLD_handler; //act处理函数
+    act.sa_flags = SA_NOCLDSTOP;
+    sigaction(SIGCHLD, &act, 0);
+
+    ServiceManager::GetInstance().ReapAnyOutstandingChildren();//具体处理子进程终止信号
+
+    register_epoll_handler(signal_read_fd, handle_signal);//注册signal_read_fd到epoll中
+}
+ 
+```
+
+### 3.3 handle_signal
+
+
+
+```C
+int socketpair(int d, int type, int protocol, int sv[2])
+```
+
+创建一对socket，用于本机内的进程通信
+参数分别是：
+- d 套接口的域 ,一般为AF_UNIX，表示Linux本机
+- type 套接口类型,参数比较多
+
+| 参数 | 含义 |
+| :-- | :-- |
+| SOCK_STREAM或SOCK_DGRAM| 即TCP或UDP|
+| SOCK_NONBLOCK   | read不到数据不阻塞，直接返回0|
+| SOCK_CLOEXEC    | 设置文件描述符为O_CLOEXEC |
+
+- protocol 使用的协议，值只能是0
+- sv 指向存储文件描述符的指针
+
+```C
 
     property_load_boot_defaults();//从文件中加载一些属性，读取usb配置
     export_oem_lock_status();//设置ro.boot.flash.locked 属性

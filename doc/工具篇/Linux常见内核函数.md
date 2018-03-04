@@ -111,9 +111,12 @@ off_toffset：被映射对象内容的起点。
 参数分别是：<br>
 - d 套接口的域 ,一般为AF_UNIX，表示Linux本机<br>
 - type 套接口类型,参数比较多<br>
-SOCK_STREAM或SOCK_DGRAM，即TCP或UDP<br>
-SOCK_NONBLOCK   read不到数据不阻塞，直接返回0<br>
-SOCK_CLOEXEC    设置文件描述符为O_CLOEXEC <br>
+
+| 参数 | 含义 |
+| :-- | :-- |
+| SOCK_STREAM或SOCK_DGRAM| 即TCP或UDP|
+| SOCK_NONBLOCK   | read不到数据不阻塞，直接返回0|
+| SOCK_CLOEXEC    | 设置文件描述符为O_CLOEXEC |
 - protocol 使用的协议，值只能是0<br>
 - sv 指向存储文件描述符的指针<br>
 
