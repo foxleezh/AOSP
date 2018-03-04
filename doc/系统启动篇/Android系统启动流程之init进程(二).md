@@ -1,7 +1,10 @@
 ## 前言
 上一篇中讲了init进程的第一阶段，我们接着讲第二阶段，主要有以下内容
 
-- 设置一些属性
+- 创建进程会话密钥并初始化属性系统
+- 进行SELinux第二阶段并恢复一些文件安全上下文
+- 新建epoll并初始化子进程终止信号处理函数
+- 设置其他系统属性并开启系统属性服务
 
 本文涉及到的文件
 ```
@@ -9,10 +12,12 @@ platform/system/core/init/init.cpp
 platform/system/core/init/keyutils.h
 platform/system/core/init/property_service.cpp
 platform/external/selinux/libselinux/src/label.c
-
+platform/system/core/init/signal_handler.cpp
+platform/system/core/init/service.cpp
+platform/system/core/init/property_service.cpp
 ```
 
-一、设置一些属性
+一、创建进程会话密钥并初始化属性系统
 
 第二阶段一开始会有一个is_first_stage的判断，由于之前第一阶段最后有设置INIT_SECOND_STAGE，
 因此直接跳过一大段代码。从keyctl开始才是重点内容，我们一一展开来看
@@ -45,7 +50,7 @@ int main(int argc, char** argv) {
     close(open("/dev/.booting", O_WRONLY | O_CREAT | O_CLOEXEC, 0000));//创建 /dev/.booting 文件，就是个标记，表示booting进行中
 
     property_init();//初始化属性系统，并从指定文件读取属性
-    
+
     //接下来的一系列操作都是从各个文件读取一些属性，然后通过property_set设置系统属性
 
     // If arguments are passed both on the command line and in DT,
@@ -54,7 +59,7 @@ int main(int argc, char** argv) {
      * 1.这句英文的大概意思是，如果参数同时从命令行和DT传过来，DT的优先级总是大于命令行的
      * 2.DT即device-tree，中文意思是设备树，这里面记录自己的硬件配置和系统运行参数，参考http://www.wowotech.net/linux_kenrel/why-dt.html
      */
-     
+
     process_kernel_dt();//处理DT属性
     process_kernel_cmdline();//处理命令行属性
 
@@ -83,7 +88,7 @@ int main(int argc, char** argv) {
 ### 1.1 keyctl
 定义在platform/system/core/init/keyutils.h
 
-这个函数将主要的工作交给__NR_keyctl这个系统调用，keyctl是Linux系统操纵内核的通讯密钥管理工具
+keyctl将主要的工作交给__NR_keyctl这个系统调用，keyctl是Linux系统操纵内核的通讯密钥管理工具
 
 
 我们分析下 keyctl(KEYCTL_GET_KEYRING_ID, KEY_SPEC_SESSION_KEYRING, 1)
@@ -129,7 +134,7 @@ void property_init() {
 
 __system_property_area_init 定义在/bionic/libc/bionic/system_properties.cpp
 
-这个函数首先清除缓存，这里主要是清除几个链表以及在内存中的映射，新建property_filename目录，
+看名字大概知道是用来初始化属性系统区域的，应该是分门别类更准确些，首先清除缓存，这里主要是清除几个链表以及在内存中的映射，新建property_filename目录，这个目录的值为 /dev/\__properties\__
 然后就是调用initialize_properties加载一些系统属性的类别信息，最后将加载的链表写入文件并映射到内存
 
 
@@ -143,7 +148,7 @@ int __system_property_area_init() {
   bool open_failed = false;
   bool fsetxattr_failed = false;
   list_foreach(contexts, [&fsetxattr_failed, &open_failed](context_node* l) {
-    if (!l->open(true, &fsetxattr_failed)) { 
+    if (!l->open(true, &fsetxattr_failed)) {
     //将contexts链表中的数据写入到property_filename目录下文件中，每种context对应一个文件，并通过mmap映射进内存中
       open_failed = true;
     }
@@ -161,7 +166,7 @@ int __system_property_area_init() {
 
 定义在/bionic/libc/bionic/system_properties.cpp
 
-这个函数主要的工作是交给 initialize_properties_from_file 处理的，指定了一些文件路径
+交给 initialize_properties_from_file 处理，指定了一些文件路径
 
 ```C
 static bool initialize_properties() {
@@ -189,7 +194,7 @@ static bool initialize_properties() {
   }
 
   return true;
-} 
+}
 ```
 
 
@@ -197,7 +202,8 @@ static bool initialize_properties() {
 
 定义在/bionic/libc/bionic/system_properties.cpp
 
-这个函数主要工作是解析属性类别文件，对属性做一下分类，具体就是一行行解析，过滤 # 开头的、只读到key的、从ctl.开头的，然后将解析出来的键值对放到两个链表中，
+这个函数主要工作是解析属性类别文件，对属性做一下分类，具体就是一行行解析，过滤 # 开头的、只读到key的、从ctl.开头的，然后将解析出来的键值对放到两个链表中
+
 prefixes链表存放key(其实是一些key的前缀),contexts链表存放value(其实是对应key应当属于那些类别的信息)，这样的好处是将庞杂的属性根据前缀分类，存储到不同的context中，
 查找和修改是非常高效的，类似map的做法
 
@@ -243,7 +249,7 @@ static bool initialize_properties_from_file(const char* filename) {
      */
     auto old_context =
         list_find(contexts, [context](context_node* l) { return !strcmp(l->context(), context); });
-        
+
     // list_find主要是循环contexts这个链表，如果发现context的值在链表里已经有，就将对应的链表结构context_node返回
     if (old_context) {
       list_add_after_len(&prefixes, prop_prefix, old_context);
@@ -260,7 +266,7 @@ static bool initialize_properties_from_file(const char* filename) {
   fclose(file);
 
   return true;
-} 
+}
 ```
 
 ### 1.5 链表结构
@@ -287,10 +293,10 @@ class context_node {
    */
   context_node(context_node* next, const char* context, prop_area* pa)
       : next(next), context_(strdup(context)), pa_(pa), no_access_(false) {
-     
+
     lock_.init(false);
   }
-  
+
   ...
 
   context_node* next;
@@ -316,7 +322,7 @@ struct prefix_node {
   const size_t prefix_len;
   context_node* context;
   struct prefix_node* next;
-}; 
+};
 
 class prop_area {
  public:
@@ -330,7 +336,7 @@ class prop_area {
   ....
 
  private:
-  
+
   ...
 
   uint32_t bytes_used_;
@@ -371,12 +377,14 @@ struct prop_info {
 template <typename List, typename... Args>
 static inline void list_add(List** list, Args... args) {
   *list = new List(*list, args...);
-} 
+}
 
 ```
 
 ### 1.6 process_kernel_dt
 定义在platform/system/core/init/init.cpp
+
+读取DT（设备树）的属性信息，然后通过 property_set 设置系统属性
 
 ```C
 static void process_kernel_dt() {
@@ -387,7 +395,7 @@ static void process_kernel_dt() {
 
     std::unique_ptr<DIR, int (*)(DIR*)> dir(opendir(kAndroidDtDir.c_str()), closedir);
     // kAndroidDtDir的值为/proc/device-tree/firmware/android
-    
+
     if (!dir) return;
 
     std::string dt_file;
@@ -409,10 +417,10 @@ static void process_kernel_dt() {
 }
 ```
 
-### 1.6 property_set
+### 1.7 property_set
 定义在/bionic/libc/bionic/system_properties.cpp
 
-这个函数主要作用就是设置系统属性，具体就是通过遍历之前的prefixs链表找到对应的context_node,然后通过context_node的_pa属性找到对应key-value节点prop_info，能找到就更新value，找不到就设置新值，
+property_set用的地方特别多，作用是设置系统属性，具体就是通过遍历之前的prefixs链表找到对应的context_node,然后通过context_node的_pa属性找到对应key-value节点prop_info，能找到就更新value，找不到就设置新值，
 另外就是调用property_changed方法触发trigger，trigger后续讲.rc解析时再详细讲，trigger可以触发一系列活动
 
 ```C
@@ -466,9 +474,9 @@ uint32_t property_set(const std::string& name, const std::string& value) {
 }
 ```
 
-### 1.7 其他属性设置
+### 1.8 其他属性设置
 
-process_kernel_cmdline函数也是调用property_set
+后续的一些函数或代码都是直接或间接调用 property_set 设置系统属性
 
 ```C
 static void process_kernel_cmdline() {
@@ -496,8 +504,6 @@ static void import_kernel_nv(const std::string& key, const std::string& value, b
 }
 
 ```
-
-export_kernel_boot_props也是
 
 ```C
 static void export_kernel_boot_props() {
@@ -532,13 +538,14 @@ static void export_kernel_boot_props() {
 定义在platform/system/core/init/init.cpp
 
 第二阶段只是执行 selinux_init_all_handles
+
 ```C
 static void selinux_initialize(bool in_kernel_domain) {
 
     ... //和之前一样设置回调函数
 
     if (in_kernel_domain) {//第二阶段跳过
-       ... 
+       ...
     } else {
         selinux_init_all_handles();
     }
@@ -548,7 +555,7 @@ static void selinux_initialize(bool in_kernel_domain) {
 ### 2.2 selinux_init_all_handles
 定义在platform/system/core/init/init.cpp
 
-这个函数主要是创建SELinux的处理函数，其实是传递不同的文件路径给selabel_open
+这里是创建SELinux的处理函数，selinux_android_file_context_handle和selinux_android_prop_context_handle内部实现差不多，其实就是传递不同的文件路径给selabel_open
 
 ```C
 static void selinux_init_all_handles(void)
@@ -563,7 +570,7 @@ static void selinux_init_all_handles(void)
 
 定义在platform/external/selinux/libselinux/src/label.c
 
-这个函数主要作用就是创建一个selabel_handle结构体，然后根据backend的类型将处理函数映射给initfuncs数组中的值，将参数opts传递过去
+首先创建一个selabel_handle结构体，然后根据backend的类型将处理函数映射给initfuncs数组中的值，将参数opts传递过去
 
 这个opts只是包含一个简单的路径，比如 /system/etc/selinux/plat_file_contexts ，而initfuncs负责去解析它
 
@@ -621,10 +628,10 @@ out:
 /* Android property service contexts */
 #define SELABEL_CTX_ANDROID_PROP 4
 /* Android service contexts */
-#define SELABEL_CTX_ANDROID_SERVICE 5 
+#define SELABEL_CTX_ANDROID_SERVICE 5
 ```
 
-这个数组中都对应一个解析函数，他们都有一个init函数，这些函数就是用来解析传进来的文件，这些文件定义了哪些进程可以访问那些文件，
+initfuncs数组中每一项都对应一个init函数，init函数主要作用是解析传进来的文件，这些传进来的文件定义了哪些进程可以访问哪些文件，执行哪些操作
 SELinux的内容比较多，由于篇幅就暂时不深入了
 可以参考老罗的[SEAndroid安全机制框架分析](http://blog.csdn.net/luoshengyang/article/details/37613135)
 
@@ -643,6 +650,7 @@ static selabel_initfunc initfuncs[] = {
 定义在 platform/system/core/init/init.cpp
 
 主要就是恢复这些文件的安全上下文，因为这些文件是在SELinux安全机制初始化前创建，所以需要重新恢复下安全性
+
 ```C
 static void selinux_restore_context() {
     LOG(INFO) << "Running restorecon...";
@@ -676,7 +684,7 @@ static void selinux_restore_context() {
 ## 三、新建epoll并初始化子进程终止信号处理函数
 
 ```C
-   
+
     epoll_fd = epoll_create1(EPOLL_CLOEXEC);//创建epoll实例，并返回epoll的文件描述符
 
     if (epoll_fd == -1) {
@@ -697,6 +705,7 @@ epoll_create1是epoll_create的升级版，可以动态调整epoll实例中文�
 EPOLL_CLOEXEC这个参数是为文件描述符添加O_CLOEXEC属性，参考http://blog.csdn.net/gqtcgq/article/details/48767691
 
 ### 3.2 signal_handler_init
+定义在platform/system/core/init/signal_handler.cpp
 
 这个函数主要的作用是注册SIGCHLD信号的处理函数
 
@@ -744,33 +753,89 @@ void signal_handler_init() {
 
     register_epoll_handler(signal_read_fd, handle_signal);//注册signal_read_fd到epoll中
 }
- 
+
 ```
 
 ### 3.3 handle_signal
+定义在platform/system/core/init/signal_handler.cpp
 
-
+首先清空signal_read_fd中的数据，然后调用ReapAnyOutstandingChildren，之前在signal_handler_init中调用过一次，
+它其实是调用ReapOneProcess
 
 ```C
-int socketpair(int d, int type, int protocol, int sv[2])
+static void handle_signal() {
+    // Clear outstanding requests.
+    char buf[32];
+    read(signal_read_fd, buf, sizeof(buf));
+
+    ServiceManager::GetInstance().ReapAnyOutstandingChildren();
+}
 ```
 
-创建一对socket，用于本机内的进程通信
-参数分别是：
-- d 套接口的域 ,一般为AF_UNIX，表示Linux本机
-- type 套接口类型,参数比较多
+### 3.4 ReapOneProcess
+定义在platform/system/core/init/service.cpp
 
-| 参数 | 含义 |
-| :-- | :-- |
-| SOCK_STREAM或SOCK_DGRAM| 即TCP或UDP|
-| SOCK_NONBLOCK   | read不到数据不阻塞，直接返回0|
-| SOCK_CLOEXEC    | 设置文件描述符为O_CLOEXEC |
-
-- protocol 使用的协议，值只能是0
-- sv 指向存储文件描述符的指针
+这是最终的处理函数了，这个函数先用waitpid找出挂掉进程的pid,然后根据pid找到对应Service，最后调用Service的Reap方法清除资源,根据进程对应的类型，决定是否重启机器或重启进程
 
 ```C
+bool ServiceManager::ReapOneProcess() {
+    int status;
+    pid_t pid = TEMP_FAILURE_RETRY(waitpid(-1, &status, WNOHANG));
+    //用waitpid函数获取状态发生变化的子进程pid
+    //waitpid的标记为WNOHANG，即非阻塞，返回为正值就说明有进程挂掉了
 
+    if (pid == 0) {
+        return false;
+    } else if (pid == -1) {
+        PLOG(ERROR) << "waitpid failed";
+        return false;
+    }
+
+    Service* svc = FindServiceByPid(pid);//通过pid找到对应的Service
+
+    std::string name;
+    std::string wait_string;
+    if (svc) {
+        name = android::base::StringPrintf("Service '%s' (pid %d)",
+                                           svc->name().c_str(), pid);
+        if (svc->flags() & SVC_EXEC) {
+            wait_string =
+                android::base::StringPrintf(" waiting took %f seconds", exec_waiter_->duration_s());
+        }
+    } else {
+        name = android::base::StringPrintf("Untracked pid %d", pid);
+    }
+
+    if (WIFEXITED(status)) {
+        LOG(INFO) << name << " exited with status " << WEXITSTATUS(status) << wait_string;
+    } else if (WIFSIGNALED(status)) {
+        LOG(INFO) << name << " killed by signal " << WTERMSIG(status) << wait_string;
+    } else if (WIFSTOPPED(status)) {
+        LOG(INFO) << name << " stopped by signal " << WSTOPSIG(status) << wait_string;
+    } else {
+        LOG(INFO) << name << " state changed" << wait_string;
+    }
+
+    if (!svc) { //没有找到，说明已经结束了
+        return true;
+    }
+
+    svc->Reap();//清除子进程相关的资源
+
+    if (svc->flags() & SVC_EXEC) {
+        exec_waiter_.reset();
+    }
+    if (svc->flags() & SVC_TEMPORARY) {
+        RemoveService(*svc);
+    }
+
+    return true;
+}
+```
+
+## 四、设置其他系统属性并开启系统属性服务
+
+```C
     property_load_boot_defaults();//从文件中加载一些属性，读取usb配置
     export_oem_lock_status();//设置ro.boot.flash.locked 属性
     start_property_service();//开启一个socket监听系统属性的设置
@@ -778,114 +843,208 @@ int socketpair(int d, int type, int protocol, int sv[2])
 
 ```
 
+### 4.1 设置其他系统属性
+
+property_load_boot_defaults，export_oem_lock_status，set_usb_controller这三个函数都是调用property_set设置一些系统属性
 
 ```C
-int main(int argc, char** argv) {
+void property_load_boot_defaults() {
+    if (!load_properties_from_file("/system/etc/prop.default", NULL)) { //从文件中读取属性
+        // Try recovery path
+        if (!load_properties_from_file("/prop.default", NULL)) {
+            // Try legacy path
+            load_properties_from_file("/default.prop", NULL);
+        }
+    }
+    load_properties_from_file("/odm/default.prop", NULL);
+    load_properties_from_file("/vendor/default.prop", NULL);
 
-    ...
+    update_sys_usb_config();
+}
 
-    const BuiltinFunctionMap function_map;
-    /*
-     * 1.C++中::表示静态方法调用，相当于java中static的方法
-     */
-    Action::set_function_map(&function_map);
-
-
-    Parser& parser = Parser::GetInstance();//设置init.rc的解析器
-	/*
-     * 1.C++中std::make_unique相当于new,它会返回一个std::unique_ptr，即智能指针
-     * 2.unique_ptr持有对对象的独有权，两个unique_ptr不能指向一个对象，不能进行复制操作只能进行移动操作
-     * 3.移动操作的函数是 p1=std::move(p) ,这样指针p指向的对象就移动到p1上了
-     * 4.接下来的这三句代码都是new一个Parser（解析器），然后将它们放到一个map里存起来
-     * 5.ServiceParser、ActionParser、ImportParser分别对应service action import的解析
-     */
-    parser.AddSectionParser("service",std::make_unique<ServiceParser>());
-    parser.AddSectionParser("on", std::make_unique<ActionParser>());
-    parser.AddSectionParser("import", std::make_unique<ImportParser>());
-    std::string bootscript = GetProperty("ro.boot.init_rc", "");
-    if (bootscript.empty()) {//如果ro.boot.init_rc没有对应的值，则解析/init.rc以及/system/etc/init、/vendor/etc/init、/odm/etc/init这三个目录下的.rc文件
-        parser.ParseConfig("/init.rc");
-        parser.set_is_system_etc_init_loaded(
-                parser.ParseConfig("/system/etc/init"));
-        parser.set_is_vendor_etc_init_loaded(
-                parser.ParseConfig("/vendor/etc/init"));
-        parser.set_is_odm_etc_init_loaded(parser.ParseConfig("/odm/etc/init"));
-    } else {//如果ro.boot.init_rc属性有值就解析属性值
-        parser.ParseConfig(bootscript);
-        parser.set_is_system_etc_init_loaded(true);
-        parser.set_is_vendor_etc_init_loaded(true);
-        parser.set_is_odm_etc_init_loaded(true);
+static void export_oem_lock_status() {
+    if (!android::base::GetBoolProperty("ro.oem_unlock_supported", false)) {
+        return;
     }
 
-    // Turning this on and letting the INFO logging be discarded adds 0.2s to
-    // Nexus 9 boot time, so it's disabled by default.
-    if (false) parser.DumpState();
+    std::string value = GetProperty("ro.boot.verifiedbootstate", "");
 
-    ActionManager& am = ActionManager::GetInstance();
+    if (!value.empty()) {
+        property_set("ro.boot.flash.locked", value == "orange" ? "0" : "1");
+    }
+}
 
-    am.QueueEventTrigger("early-init");//QueueEventTrigger用于触发Action,参数early-init指Action的标记
+static void set_usb_controller() {
+    std::unique_ptr<DIR, decltype(&closedir)>dir(opendir("/sys/class/udc"), closedir);
+    if (!dir) return;
 
-    // Queue an action that waits for coldboot done so we know ueventd has set up all of /dev...
-    am.QueueBuiltinAction(wait_for_coldboot_done_action, "wait_for_coldboot_done");
-    //QueueBuiltinAction用于添加Action，第一个参数是Action要执行的Command,第二个是Trigger
+    dirent* dp;
+    while ((dp = readdir(dir.get())) != nullptr) {
+        if (dp->d_name[0] == '.') continue;
 
-    // ... so that we can start queuing up actions that require stuff from /dev.
-    am.QueueBuiltinAction(mix_hwrng_into_linux_rng_action, "mix_hwrng_into_linux_rng");
-    am.QueueBuiltinAction(set_mmap_rnd_bits_action, "set_mmap_rnd_bits");
-    am.QueueBuiltinAction(set_kptr_restrict_action, "set_kptr_restrict");
-    am.QueueBuiltinAction(keychord_init_action, "keychord_init");
-    am.QueueBuiltinAction(console_init_action, "console_init");
+        property_set("sys.usb.controller", dp->d_name);
+        break;
+    }
+}
+```
 
-    // Trigger all the boot actions to get us started.
-    am.QueueEventTrigger("init");
+### 4.2 start_property_service
+定义在platform/system/core/init/property_service.cpp
 
-    // Repeat mix_hwrng_into_linux_rng in case /dev/hw_random or /dev/random
-    // wasn't ready immediately after wait_for_coldboot_done
-    am.QueueBuiltinAction(mix_hwrng_into_linux_rng_action, "mix_hwrng_into_linux_rng");
+之前我们看到通过property_set可以轻松设置系统属性，那干嘛这里还要启动一个属性服务呢？这里其实涉及到一些权限的问题，不是所有进程都可以随意修改任何的系统属性，
+Android将属性的设置统一交由init进程管理，其他进程不能直接修改属性，而只能通知init进程来修改，而在这过程中，init进程可以进行权限控制，我们来看看这些是如何实现的
 
-    // Don't mount filesystems or start core system services in charger mode.
-    std::string bootmode = GetProperty("ro.bootmode", "");
-    if (bootmode == "charger") {
-        am.QueueEventTrigger("charger");
+首先创建一个socket并返回文件描述符，然后设置最大并发数为8，其他进程可以通过这个socket通知init进程修改系统属性，
+最后注册epoll事件，也就是当监听到property_set_fd改变时调用handle_property_set_fd
+
+
+```C
+void start_property_service() {
+    property_set("ro.property_service.version", "2");
+
+    property_set_fd = create_socket(PROP_SERVICE_NAME, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK,
+                                    0666, 0, 0, NULL);//创建socket用于通信
+    if (property_set_fd == -1) {
+        PLOG(ERROR) << "start_property_service socket creation failed";
+        exit(1);
+    }
+
+    listen(property_set_fd, 8);//监听property_set_fd，设置最大并发数为8
+
+    register_epoll_handler(property_set_fd, handle_property_set_fd);//注册epoll事件
+}
+
+```
+
+### 4.3 handle_property_set_fd
+定义在platform/system/core/init/property_service.cpp
+
+这个函数主要作用是建立socket连接，然后从socket中读取操作信息，根据不同的操作类型，调用handle_property_set做具体的操作
+
+```C
+static void handle_property_set_fd() {
+    static constexpr uint32_t kDefaultSocketTimeout = 2000; /* ms */
+
+    int s = accept4(property_set_fd, nullptr, nullptr, SOCK_CLOEXEC);//等待客户端连接
+    if (s == -1) {
+        return;
+    }
+
+    struct ucred cr;
+    socklen_t cr_size = sizeof(cr);
+    if (getsockopt(s, SOL_SOCKET, SO_PEERCRED, &cr, &cr_size) < 0) {//获取连接到此socket的进程的凭据
+        close(s);
+        PLOG(ERROR) << "sys_prop: unable to get SO_PEERCRED";
+        return;
+    }
+
+    SocketConnection socket(s, cr);// 建立socket连接
+    uint32_t timeout_ms = kDefaultSocketTimeout;
+
+    uint32_t cmd = 0;
+    if (!socket.RecvUint32(&cmd, &timeout_ms)) { //读取socket中的操作信息
+        PLOG(ERROR) << "sys_prop: error while reading command from the socket";
+        socket.SendUint32(PROP_ERROR_READ_CMD);
+        return;
+    }
+
+    switch (cmd) { //根据操作信息，执行对应处理,两者区别一个是以char形式读取，一个以String形式读取
+    case PROP_MSG_SETPROP: {
+        char prop_name[PROP_NAME_MAX];
+        char prop_value[PROP_VALUE_MAX];
+
+        if (!socket.RecvChars(prop_name, PROP_NAME_MAX, &timeout_ms) ||
+            !socket.RecvChars(prop_value, PROP_VALUE_MAX, &timeout_ms)) {
+          PLOG(ERROR) << "sys_prop(PROP_MSG_SETPROP): error while reading name/value from the socket";
+          return;
+        }
+
+        prop_name[PROP_NAME_MAX-1] = 0;
+        prop_value[PROP_VALUE_MAX-1] = 0;
+
+        handle_property_set(socket, prop_value, prop_value, true);
+        break;
+      }
+
+    case PROP_MSG_SETPROP2: {
+        std::string name;
+        std::string value;
+        if (!socket.RecvString(&name, &timeout_ms) ||
+            !socket.RecvString(&value, &timeout_ms)) {
+          PLOG(ERROR) << "sys_prop(PROP_MSG_SETPROP2): error while reading name/value from the socket";
+          socket.SendUint32(PROP_ERROR_READ_DATA);
+          return;
+        }
+
+        handle_property_set(socket, name, value, false);
+        break;
+      }
+
+    default:
+        LOG(ERROR) << "sys_prop: invalid command " << cmd;
+        socket.SendUint32(PROP_ERROR_INVALID_CMD);
+        break;
+    }
+}
+```
+
+### 4.4 handle_property_set
+定义在platform/system/core/init/property_service.cpp
+
+这就是最终的处理函数，以"ctl."开头的key就做一些Service的Start,Stop,Restart操作，其他的就是调用property_set进行属性设置，
+不管是前者还是后者，都要进行SELinux安全性检查，只有该进程有操作权限才能执行相应操作
+
+```C
+static void handle_property_set(SocketConnection& socket,
+                                const std::string& name,
+                                const std::string& value,
+                                bool legacy_protocol) {
+  const char* cmd_name = legacy_protocol ? "PROP_MSG_SETPROP" : "PROP_MSG_SETPROP2";
+  if (!is_legal_property_name(name)) { //检查key的合法性
+    LOG(ERROR) << "sys_prop(" << cmd_name << "): illegal property name \"" << name << "\"";
+    socket.SendUint32(PROP_ERROR_INVALID_NAME);
+    return;
+  }
+
+  struct ucred cr = socket.cred(); //获取操作进程的凭证
+  char* source_ctx = nullptr;
+  getpeercon(socket.socket(), &source_ctx);
+
+  if (android::base::StartsWith(name, "ctl.")) { //如果以ctl.开头，就执行Service的一些控制操作
+    if (check_control_mac_perms(value.c_str(), source_ctx, &cr)) {//SELinux安全检查，有权限才进行操作
+      handle_control_message(name.c_str() + 4, value.c_str());
+      if (!legacy_protocol) {
+        socket.SendUint32(PROP_SUCCESS);
+      }
     } else {
-        am.QueueEventTrigger("late-init");
+      LOG(ERROR) << "sys_prop(" << cmd_name << "): Unable to " << (name.c_str() + 4)
+                 << " service ctl [" << value << "]"
+                 << " uid:" << cr.uid
+                 << " gid:" << cr.gid
+                 << " pid:" << cr.pid;
+      if (!legacy_protocol) {
+        socket.SendUint32(PROP_ERROR_HANDLE_CONTROL_MESSAGE);
+      }
     }
-
-    // Run all property triggers based on current state of the properties.
-    am.QueueBuiltinAction(queue_property_triggers_action, "queue_property_triggers");
-
-    while (true) {
-        // By default, sleep until something happens.
-        int epoll_timeout_ms = -1;
-
-        if (!(waiting_for_prop || ServiceManager::GetInstance().IsWaitingForExec())) {
-            am.ExecuteOneCommand();
-        }
-        if (!(waiting_for_prop || ServiceManager::GetInstance().IsWaitingForExec())) {
-            restart_processes();
-
-            // If there's a process that needs restarting, wake up in time for that.
-            if (process_needs_restart_at != 0) {
-                epoll_timeout_ms = (process_needs_restart_at - time(nullptr)) * 1000;
-                if (epoll_timeout_ms < 0) epoll_timeout_ms = 0;
-            }
-
-            // If there's more work to do, wake up again immediately.
-            if (am.HasMoreCommands()) epoll_timeout_ms = 0;
-        }
-
-        epoll_event ev;
-        int nr = TEMP_FAILURE_RETRY(epoll_wait(epoll_fd, &ev, 1, epoll_timeout_ms));
-        if (nr == -1) {
-            PLOG(ERROR) << "epoll_wait failed";
-        } else if (nr == 1) {
-            ((void (*)()) ev.data.ptr)();
-        }
+  } else { //其他的属性调用property_set进行设置
+    if (check_mac_perms(name, source_ctx, &cr)) {//SELinux安全检查，有权限才进行操作
+      uint32_t result = property_set(name, value);
+      if (!legacy_protocol) {
+        socket.SendUint32(result);
+      }
+    } else {
+      LOG(ERROR) << "sys_prop(" << cmd_name << "): permission denied uid:" << cr.uid << " name:" << name;
+      if (!legacy_protocol) {
+        socket.SendUint32(PROP_ERROR_PERMISSION_DENIED);
+      }
     }
+  }
 
-    return 0;
+  freecon(source_ctx);
 }
 ```
 
 
+**小结**
 
+init进程第二阶段主要工作是初始化属性系统，解析SELinux的匹配规则，处理子进程终止信号，启动系统属性服务，可以说每一项都很关键，如果说第一阶段是为属性系统，SELinux做准备，那么第二阶段就是真正去把这些落实的，下一篇我们将讲解.rc文件的解析
