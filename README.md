@@ -48,7 +48,17 @@ JNI却是双向的，Java可以调用C++,C++也可以调用Java.那么Linux内�
 内核直接运行一个可执行程序就可以了,比如native中的init进程就是这样调用的
 
 ## 通信方式
-另外，Android系统中有许多通信方式，最常见
+Android系统中有许多通信方式，最常见就是Binder和Handler，这是我们平常开发中用到的，另外底层常见的还有Socket, pipe，signal
+除了Handler只能用于线程间通信外，其他都可以进行进程间通信，当然你也可以用来做线程间通信，只是有点杀鸡用牛刀的感觉.
+
+Binder作为Android系统提供的一种IPC机制，无论从系统开发还是应用开发，都是Android系统中最重要的组成. Binder通信采用c/s架构，从组件视角来说，包含Client、Server、ServiceManager以及binder驱动，
+其核心实现原理是用系统调用ioctl在内核空间进行进程间通信，它还做了许多良好的封装，比如如果发现调用者和接收者是同一进程，就不会去走系统调用,而是直接调用
+
+Handler消息机制我们比较熟悉，Handler消息机制是由一组MessageQueue、Message、Looper、Handler共同组成的，为了方便且称之为Handler消息机制.
+其核心实现原理是共享内存，由于工作线程与主线程共享地址空间，即Handler实例对象mHandler位于线程间共享的内存堆上，工作线程与主线程都能直接使用该对象.
+Handler最经典的地方就是消息队列，MessageQueue存放要处理的消息Message，Looper无限循环从MessageQueue中取Message发到对应线程处理
+
+## 内容分类
 
 本项目以android-8.0.0_r17和kernel/msm(高通内核android-8.0.0_r0.16)为基础，重点分析跟应用程序相关的源码，主要内容如下：
 - Android系统启动流程，应用启动流程，四大组件启动流程，这将列入系统启动篇
@@ -60,11 +70,15 @@ JNI却是双向的，Java可以调用C++,C++也可以调用Java.那么Linux内�
 - Android对于Java集合的优化算法，这将列入Java基础篇
 
 我将持续更新本项目，尽可能地为大家提供透彻的Android源码分析，每篇文章我会挂在issue上，方便大家探讨并提出问题
-## 一、工具篇
+### 工具篇
 - [如何下载Android源码](https://github.com/foxleezh/AOSP/issues/1)<br>
 - [如何阅读Android源码](https://github.com/foxleezh/AOSP/issues/2)<br>
 - [C语言知识整理](https://github.com/foxleezh/AOSP/issues/4)<br>
+- [C++语言知识整理](https://github.com/foxleezh/AOSP/issues/7)<br>
 - [Linux常见内核函数](https://github.com/foxleezh/AOSP/issues/5)<br>
+- [Andorid常见内核函数](https://github.com/foxleezh/AOSP/issues/8)<br>
 
-## 二、系统启动篇
+### 系统启动篇
 - [Android系统启动流程之Linux内核](https://github.com/foxleezh/AOSP/issues/3)<br>
+- [Android系统启动流程之init进程(一)](https://github.com/foxleezh/AOSP/issues/6)<br>
+- [Android系统启动流程之init进程(二)](https://github.com/foxleezh/AOSP/issues/9)<br>
