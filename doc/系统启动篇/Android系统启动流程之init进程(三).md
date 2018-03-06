@@ -50,6 +50,91 @@ init进程在调用 mount\_all 时将其加载，在合适的时机运行其定�
 在 mount\_all 语句中有 "early" 和 "late" 两个可选项，当 early 设置的时候，init进程将跳过被 latemount 标记的挂载操作，并触发fs encryption state 事件，
 当 late 被设置的时候，init进程只会执行 latemount 标记的挂载操作，但是会跳过导入的 .rc文件的执行. 默认情况下，不设置任何选项，init进程将执行所有挂载操作
 
+### 1.3 Actions
+> Actions由一行行命令组成. trigger用来决定什么时候触发这些命令,当一个事件满足trigger的触发条件时，
+这个action就会被加入到处理队列中（除非队列中已经存在）<br><br>
+队列中的action按顺序取出执行，action中的命令按顺序执行. 这些命令的执行包含一些活动（设备创建/销毁，属性设置，进程重启）<br><br>
+Actions的格式如下：
+```
+    on <trigger> [&& <trigger>]*
+       <command>
+       <command>
+       <command>
+```
+
+### 1.4 Services
+> Services是init进程启动的程序,它们也可能在退出时自动重启. Services的格式如下：
+```C
+    service <name> <pathname> [ <argument> ]*
+       <option>
+       <option>
+       ...
+```
+
+### 1.5 Options
+> Options是对Services的参数. 它们影响Service如何运行及运行时机<br><br>
+`console [<console>]`<br>
+Service需要控制台. 第二个参数console的意思是可以设置你想要的控制台类型，默认控制台是/dev/console ,
+/dev 这个前缀通常是被忽略的，比如你要设置控制台 /dev/tty0 ,那么只需要设置为console tty0<br><br>
+`critical`<br>
+表示Service是严格模式. 如果这个Service在4分钟内退出超过4次，那么设备将重启进入recovery模式<br><br>
+`disabled`<br>
+表示Service不能以class的形式启动，只能以name的形式启动<br><br>
+`setenv <name> <value>`<br>
+在Service启动时设置name-value的环境变量<br><br>
+`socket <name> <type> <perm> [ <user> [ <group> [ <seclabel> ] ] ]`<br>
+创建一个unix域的socket,名字叫/dev/socket/_name_ , 并将fd返回给Service. _type_ 只能是 "dgram", "stream" or "seqpacket".
+User 和 group 默认值是 0. 'seclabel' 是这个socket的SELinux安全上下文,它的默认值是service安全策略或者基于其可执行文件的安全上下文.
+它对应的代码在libcutils的android\_get\_control\_socket<br><br>
+`file <path> <type>`<br>
+打开一个文件，并将fd返回给这个Service. _type_ 只能是 "r", "w" or "rw". 它对应的代码在libcutils的android\_get\_control\_file<br><br>
+`user <username>`<br>
+在启动Service前将user改为username,默认启动时user为root(或许默认是无).
+在Android M版本，程序必须设置这个值，即使它想有root权限. 以前，一个程序要想有root权限，必须先以root身份运行，然后再降级到所需的uid.
+现在已经有一套新的机制取而代之，它通过fs\_config允许厂商赋予特殊二进制文件root权限. 这些说明文档在<http://source.android.com/devices/tech/config/filesystem.html>.
+当使用这套新的机制时，程序可以通过user参数选择自己所需的uid,而不需要以root权限运行. 在Android O版本，
+程序可以通过capabilities参数直接申请所需的能力，参见下面的capabilities说明<br><br>
+`group <groupname> [ <groupname>\* ]`<br>
+在启动Service前将group改为第一个groupname,第一个groupname是必须有的，
+默认值为root（或许默认值是无），第二个groupname可以不设置，用于追加组（通过setgroups）.<br><br>
+`capabilities <capability> [ <capability>\* ]`<br>
+在启动Service时将capabilities设置为capability. 'capability' 不能是"CAP\_" prefix, like "NET\_ADMIN" or "SETPCAP". 参考
+http://man7.org/linux/man-pages/man7/capabilities.7.html ，里面有capability的说明.<br><br>
+`seclabel <seclabel>`<br>
+在启动Service前将seclabel设置为seclabel. 主要用于在rootfs上启动的service，比如ueventd, adbd.
+在系统分区上运行的service有自己的SELinux安全策略，如果不设置，默认使用init的安全策略.<br><br>
+`oneshot`<br>
+退出后不再重启<br><br>
+`class <name> [ <name>\* ]`<br>
+为Service指定class名字. 同一个class名字的Service会被一起启动或退出,默认值是"default",第二个name可以不设置，用于service组.<br><br>
+`animation class`<br>
+animation class 主要包含为开机动画或关机动画服务的service. 它们很早被启动，而且直到关机最后一步才退出.
+它们不允许访问/data 目录，它们可以检查/data目录，但是不能打开 /data 目录，而且需要在 /data 不能用时也正常工作.<br><br>
+`onrestart`<br>
+在Service重启时执行命令.<br><br>
+`writepid <file> [ <file>\* ]`<br>
+当Service调用fork时将子进程的pid写入到指定文件. 用于cgroup/cpuset的使用，当/dev/cpuset/下面没有文件但ro.cpuset.default的值却不为空时,
+将pid的值写入到/dev/cpuset/_cpuset\_name_/tasks文件中<br><br>
+`priority <priority>`<br>
+设置进程优先级. 在-20～19之间，默认值是0,能过setpriority实现<br><br>
+`namespace <pid|mnt>`<br>
+当fork这个service时，设置新的pid和挂载空间<br><br>
+`oom_score_adjust <value>`<br>
+设置子进程的 /proc/self/oom\_score\_adj 的值为 value,在 -1000 ～ 1000之间.<br><br>
+
+### 1.6 Triggers
+> Triggers 是个字符串，当一些事件发生满足该条件时，一些actions就会被执行<br><br>
+Triggers分为事件Trigger和属性Trigger<br><br>
+事件Trigger由trigger 命令或QueueEventTrigger方法触发.它的格式是个简单的字符串，比如'boot' 或 'late-init'.<br><br>
+属性Trigger是在属性被设置或发生改变时触发. 格式是'property:<name>=<value>'或'property:<name>=\*',它会在init初始化设置属性的时候触发.<br><br>
+属性Trigger定义的Action可能有多种触发方式，但是事件Trigger定义的Action可能只有一种触发方式<br><br>
+比如：<br>
+`on boot && property:a=b` 定义了action的触发条件是，boot Trigger触发，并且属性a的值等于b<br><br>
+`on property:a=b && property:c=d` 这个定义有三种触发方式:<br>
+   1. 在初始化时，属性a=b,属性c=d.
+   2. 在属性c=d的情况下，属性a被改为b.
+   3. A在属性a=b的情况下，属性c被改为d.
+
 ```C
 int main(int argc, char** argv) {
 
