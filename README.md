@@ -11,7 +11,46 @@
 
 ## 前言
 
-本项目以android-8.0.0_r17(目前最新版本)和kernel/msm(高通内核android-8.0.0_r0.16)为基础，重点分析跟应用程序相关的源码，主要内容如下：
+AOSP的源码是非常庞大的，里面的语言主要有C/C++，Java, 汇编，为了让大家能有更好的阅读体验，我专门写了篇文章作为导读
+
+[如何阅读Android源码](https://github.com/foxleezh/AOSP/issues/2)<br>
+
+## 系统结构
+
+Android系统结构很复杂，可能大家平常都是应用层开发比较多，我们开发的app属于最上层
+
+应用层下面有个应用框架层（framework）,也就是我们经常在Android Studio中可以直接点击看到那些源码，应用层和应用框架层都是用Java写的
+
+在应用框架层下面是Native层，也就是我们调用的native方法的实现层，这一层主要是用C/C++写的
+
+在Native层再往下就是Linux内核层，这一层主要是用C和汇编来写的
+
+在Native层和Linux内核层之间还有个硬件抽象层，准确讲它应该属于Linux内核层，因为都是些驱动相关的
+但是因为Linux是开源的，如果放在Linux内核层就必须开源代码，为了保护厂商的驱动源码，所以将这些代码专门提出来，放到了一个硬件抽象层
+
+可以看到，Android系统用了Java,C/C++，汇编，这些不同的语言和层级是如何打通的呢？这里主要涉及到JNI和Syscall，
+我们知道Java是运行在虚拟机中的，在Native层就有一个专门的虚拟机，dex代码和so动态链接库都会加载到这个虚拟机中，
+使用同一个进程空间，dex代码和so动态链接库之间定义的相同的接口，就像我们平时写服务器和客户端用相同的接口字段一样，
+这样Java和C/C++之间就可以相互通信了，而这套机制就叫JNI（Java Native Interface）
+
+Native层是运行在用户空间的，Linux内核层是运行在内核空间，一般情况下，用户进程是不能访问内核的，
+它既不能访问内核所在的内存空间，也不能调用内核中的函数. 而Syscall就是专门用来让Native访问Linux内核的，
+在/platform/bionic/libc/kernel/uapi/asm-generic/unistd.h中，在这个文件中为每一个系统调用规定了唯一的编号，叫做系统调用号
+```C
+#define __NR_epoll_create1 20
+#define __NR_epoll_ctl 21
+#define __NR_epoll_pwait 22
+#define __NR_dup 23
+```
+这里面每一个宏就是一个系统调用号,每一个调用号都会对应Linux内核的一个操作.
+Syscall是单向的，只能是Native调用Linux内核，
+JNI却是双向的，Java可以调用C++,C++也可以调用Java.那么Linux内核如何调用Native呢，其实也很简单，
+内核直接运行一个可执行程序就可以了,比如native中的init进程就是这样调用的
+
+## 通信方式
+另外，Android系统中有许多通信方式，最常见
+
+本项目以android-8.0.0_r17和kernel/msm(高通内核android-8.0.0_r0.16)为基础，重点分析跟应用程序相关的源码，主要内容如下：
 - Android系统启动流程，应用启动流程，四大组件启动流程，这将列入系统启动篇
 - 系统常用服务ActivityManagerService,WindowManagerService等，这将列入系统服务篇
 - 通信机制，主要是Binder和Handler，这将列入通信篇
