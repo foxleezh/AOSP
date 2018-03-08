@@ -29,16 +29,16 @@ platform/system/core/init/init.cpp
 Actions和Services可以作为一个独立的Section,所有的Commands和Options从属于紧挨着的Actions或Services，定义在第一个Section前的Commands和Options将被忽略掉 <br><br>
 Actions和Services都是唯一的，如果定义了两个一样的Action，第二个Action的Command将追加到第一个Action，
 如果定义了两个一样的Service，第二个Service将被忽略掉并打印错误日志
-### Init .rc Files
+> ### Init .rc Files
 > Android Init Language是用后缀为.rc纯文本编写的,而且是由多个分布在不同目录下的.rc文件组成,如下所述 <br><br>
 /init.rc 是最主要的一个.rc文件，它由init进程在初始化时加载，主要负责系统初始化,它会导入 /init.${ro.hardware}.rc ，这个是系统级核心厂商提供的主要.rc文件<br><br>
 当执行 mount\_all 语句时，init进程将加载所有在 /{system,vendor,odm}/etc/init/ 目录下的文件，挂载好文件系统后，这些目录将会为Actions和Services服务<br><br>
 有一个特殊的目录可能被用来替换上面的三个默认目录，这主要是为了支持工厂模式和其他非标准的启动模式,上面三个目录用于正常的启动过程<br><br>
 这三个用于扩展的目录是<br>
-1. /system/etc/init/ 用于系统本身，比如SurfaceFlinger, MediaService, and logcatd.<br>
-2. /vendor/etc/init/ 用于SoC(系统级核心厂商，如高通),为他们提供一些核心功能和服务<br>
-3. /odm/etc/init/ 用于设备制造商（odm定制厂商，如华为、小米），为他们的传感器或外围设备提供一些核心功能和服务<br><br>
-所有放在这三个目录下的Services二进制文件都必须有一个对应的.rc文件放在该目录下，并且要在.rc文件中定义service结构,
+> 1. /system/etc/init/ 用于系统本身，比如SurfaceFlinger, MediaService, and logcatd.<br>
+> 2. /vendor/etc/init/ 用于SoC(系统级核心厂商，如高通),为他们提供一些核心功能和服务<br>
+> 3. /odm/etc/init/ 用于设备制造商（odm定制厂商，如华为、小米），为他们的传感器或外围设备提供一些核心功能和服务<br><br>
+> 所有放在这三个目录下的Services二进制文件都必须有一个对应的.rc文件放在该目录下，并且要在.rc文件中定义service结构,
 有一个宏LOCAL\_INIT\_RC,可以帮助开发者处理这个问题. 每个.rc文件还应当包含一些与之相关的actions<br><br>
 举个例子，在system/core/logcat目录下有logcatd.rc和Android.mk这两个文件. Android.mk文件中用LOCAL\_INIT\_RC这个宏，在编译时将logcatd.rc放在/system/etc/init/目录下,
 init进程在调用 mount\_all 时将其加载，在合适的时机运行其定义的service并将action放入队列<br><br>
@@ -46,7 +46,7 @@ init进程在调用 mount\_all 时将其加载，在合适的时机运行其定�
 另外，这样还可以解决多个services加入到系统时发生的冲突，因为他们都拆分到了不同的文件中<br><br>
 在 mount\_all 语句中有 "early" 和 "late" 两个可选项，当 early 设置的时候，init进程将跳过被 latemount 标记的挂载操作，并触发fs encryption state 事件，
 当 late 被设置的时候，init进程只会执行 latemount 标记的挂载操作，但是会跳过导入的 .rc文件的执行. 默认情况下，不设置任何选项，init进程将执行所有挂载操作
-### Actions
+> ### Actions
 > Actions由一行行命令组成. trigger用来决定什么时候触发这些命令,当一个事件满足trigger的触发条件时，
 这个action就会被加入到处理队列中（除非队列中已经存在）<br><br>
 队列中的action按顺序取出执行，action中的命令按顺序执行. 这些命令的执行包含一些活动（设备创建/销毁，属性设置，进程重启）<br><br>
@@ -57,7 +57,7 @@ Actions的格式如下：
        <command>
        <command>
 ```
-### Services
+> ### Services
 > Services是init进程启动的程序,它们也可能在退出时自动重启. Services的格式如下：
 ```C
     service <name> <pathname> [ <argument> ]*
@@ -65,7 +65,7 @@ Actions的格式如下：
        <option>
        ...
 ```
-### Options
+> ### Options
 > Options是对Services的参数. 它们影响Service如何运行及运行时机<br><br>
 `console [<console>]`<br>
 Service需要控制台. 第二个参数console的意思是可以设置你想要的控制台类型，默认控制台是/dev/console ,
@@ -115,7 +115,7 @@ animation class 主要包含为开机动画或关机动画服务的service. 它�
 当fork这个service时，设置新的pid和挂载空间<br><br>
 `oom_score_adjust <value>`<br>
 设置子进程的 /proc/self/oom\_score\_adj 的值为 value,在 -1000 ～ 1000之间.<br><br>
-### Triggers
+> ### Triggers
 > Triggers 是个字符串，当一些事件发生满足该条件时，一些actions就会被执行<br><br>
 Triggers分为事件Trigger和属性Trigger<br><br>
 事件Trigger由trigger 命令或QueueEventTrigger方法触发.它的格式是个简单的字符串，比如'boot' 或 'late-init'.<br><br>
@@ -124,10 +124,10 @@ Triggers分为事件Trigger和属性Trigger<br><br>
 比如：<br>
 `on boot && property:a=b` 定义了action的触发条件是，boot Trigger触发，并且属性a的值等于b<br><br>
 `on property:a=b && property:c=d` 这个定义有三种触发方式:<br>
-   1. 在初始化时，属性a=b,属性c=d.
-   2. 在属性c=d的情况下，属性a被改为b.
-   3. A在属性a=b的情况下，属性c被改为d.
-### Commands
+> 1. 在初始化时，属性a=b,属性c=d.
+> 2. 在属性c=d的情况下，属性a被改为b.
+> 3. A在属性a=b的情况下，属性c被改为d.
+> ### Commands
 > `bootchart [start|stop]`<br>
 启动或终止bootcharting. 这个出现在init.rc文件中，但是只有在/data/bootchart/enabled文件存在的时候才有效，否则不能工作<br><br>
 `chmod <octal-mode> <path>`<br>
@@ -152,10 +152,8 @@ Triggers分为事件Trigger和属性Trigger<br><br>
 将一个禁用的service设置为可用.
 如果这个service在运行，那么就会重启.
 一般用在bootloader时设置属性，然后启动一个service，比如
-```
-    on property:ro.boot.myfancyhardware=1
-        enable my_fancy_service_for_my_fancy_hardware
-```
+on property:ro.boot.myfancyhardware=1
+   enable my_fancy_service_for_my_fancy_hardware
 `exec [ <seclabel> [ <user> [ <group>\* ] ] ] -- <command> [ <argument>\* ]`
 新建子进程并运行一个带指定参数的命令. 这个命令指定了seclabel（安全策略），user(所有者)，group(用户组).
 直到这个命令运行完才可以运行其他命令，seclabel可以设置为 - 表示用默认值，argument表示属性值.
@@ -226,13 +224,13 @@ _options_ 包括 "barrier=1", "noauto\_da\_alloc", "discard", ... 用逗号分�
 等待name属性的值被设置为value，如果name的值一旦被设置为value，马上继续<br><br>
 `write <path> <content>`<br>
 打开path下的文件，并用write(2)写入content内容. 如果文件不存在就会被创建，如果存在就会被覆盖掉<br><br>
-### Imports
+> ### Imports
 > import关键字不是一个命令，但是如果有.rc文件包含它就会马上解析它里面的section,用法如下：<br><br>
 `import <path>`<br>
 解析path下的.rc文件 ，括展当前文件的配置。如果path是个目录，这个目录下所有.rc文件都被解析，但是不会递归,
 import被用于以下两个地方：<br>
-1.在初始化时解析init.rc文件<br>
-2.在mount_all时解析{system,vendor,odm}/etc/init/等目录下的.rc文件
+> 1.在初始化时解析init.rc文件<br>
+> 2.在mount_all时解析{system,vendor,odm}/etc/init/等目录下的.rc文件
 
 ```C
 int main(int argc, char** argv) {
