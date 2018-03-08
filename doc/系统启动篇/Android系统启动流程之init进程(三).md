@@ -23,16 +23,13 @@ platform/system/core/init/init.cpp
 定义在platform/system/core/init/README.md
 
 源码中已经有一个专门的文档用来说明Android Init Language，应当说这个文档写得还是挺不错的,认真读这个文档的话，基本的语法知识就都知道了,我简单翻译下
-
-### 1.1 Android Init Language
-
+> ### Android Init Language
 > Android Init Language中由5类语法组成，分别是Actions, Commands, Services, Options, and Imports <br><br>
 每一行是一个语句，单词之间用空格分开，如果单词中有空格可以用反斜杠转义，也可以用双引号来引用文本避免和空格冲突，如果一行语句太长可以用 \ 换行，用 # 表示注释 <br><br>
 Actions和Services可以作为一个独立的Section,所有的Commands和Options从属于紧挨着的Actions或Services，定义在第一个Section前的Commands和Options将被忽略掉 <br><br>
 Actions和Services都是唯一的，如果定义了两个一样的Action，第二个Action的Command将追加到第一个Action，
 如果定义了两个一样的Service，第二个Service将被忽略掉并打印错误日志
-
-### 1.2 Init .rc Files
+### Init .rc Files
 > Android Init Language是用后缀为.rc纯文本编写的,而且是由多个分布在不同目录下的.rc文件组成,如下所述 <br><br>
 /init.rc 是最主要的一个.rc文件，它由init进程在初始化时加载，主要负责系统初始化,它会导入 /init.${ro.hardware}.rc ，这个是系统级核心厂商提供的主要.rc文件<br><br>
 当执行 mount\_all 语句时，init进程将加载所有在 /{system,vendor,odm}/etc/init/ 目录下的文件，挂载好文件系统后，这些目录将会为Actions和Services服务<br><br>
@@ -49,8 +46,7 @@ init进程在调用 mount\_all 时将其加载，在合适的时机运行其定�
 另外，这样还可以解决多个services加入到系统时发生的冲突，因为他们都拆分到了不同的文件中<br><br>
 在 mount\_all 语句中有 "early" 和 "late" 两个可选项，当 early 设置的时候，init进程将跳过被 latemount 标记的挂载操作，并触发fs encryption state 事件，
 当 late 被设置的时候，init进程只会执行 latemount 标记的挂载操作，但是会跳过导入的 .rc文件的执行. 默认情况下，不设置任何选项，init进程将执行所有挂载操作
-
-### 1.3 Actions
+### Actions
 > Actions由一行行命令组成. trigger用来决定什么时候触发这些命令,当一个事件满足trigger的触发条件时，
 这个action就会被加入到处理队列中（除非队列中已经存在）<br><br>
 队列中的action按顺序取出执行，action中的命令按顺序执行. 这些命令的执行包含一些活动（设备创建/销毁，属性设置，进程重启）<br><br>
@@ -61,8 +57,7 @@ Actions的格式如下：
        <command>
        <command>
 ```
-
-### 1.4 Services
+### Services
 > Services是init进程启动的程序,它们也可能在退出时自动重启. Services的格式如下：
 ```C
     service <name> <pathname> [ <argument> ]*
@@ -70,8 +65,7 @@ Actions的格式如下：
        <option>
        ...
 ```
-
-### 1.5 Options
+### Options
 > Options是对Services的参数. 它们影响Service如何运行及运行时机<br><br>
 `console [<console>]`<br>
 Service需要控制台. 第二个参数console的意思是可以设置你想要的控制台类型，默认控制台是/dev/console ,
@@ -121,8 +115,7 @@ animation class 主要包含为开机动画或关机动画服务的service. 它�
 当fork这个service时，设置新的pid和挂载空间<br><br>
 `oom_score_adjust <value>`<br>
 设置子进程的 /proc/self/oom\_score\_adj 的值为 value,在 -1000 ～ 1000之间.<br><br>
-
-### 1.6 Triggers
+### Triggers
 > Triggers 是个字符串，当一些事件发生满足该条件时，一些actions就会被执行<br><br>
 Triggers分为事件Trigger和属性Trigger<br><br>
 事件Trigger由trigger 命令或QueueEventTrigger方法触发.它的格式是个简单的字符串，比如'boot' 或 'late-init'.<br><br>
@@ -134,6 +127,112 @@ Triggers分为事件Trigger和属性Trigger<br><br>
    1. 在初始化时，属性a=b,属性c=d.
    2. 在属性c=d的情况下，属性a被改为b.
    3. A在属性a=b的情况下，属性c被改为d.
+### Commands
+> `bootchart [start|stop]`<br>
+启动或终止bootcharting. 这个出现在init.rc文件中，但是只有在/data/bootchart/enabled文件存在的时候才有效，否则不能工作<br><br>
+`chmod <octal-mode> <path>`<br>
+修改文件读写权限<br><br>
+`chown <owner> <group> <path>`<br>
+修改文件所有者或所属用户组<br><br>
+`class_start <serviceclass>`<br>
+启动所有以serviceclass命名的未启动的service<br><br>
+`class_stop <serviceclass>`<br>
+终止所有以serviceclass命名的正在运行的service<br><br>
+`class_reset <serviceclass>`<br>
+终止所有以serviceclass命名的正在运行的service,但是不禁用它们. 它们可以稍后被`class_start`重启<br><br>
+`class_restart <serviceclass>`<br>
+重启所有以serviceclass命名的service<br><br>
+`copy <src> <dst>`<br>
+复制一个文件，与write相似，比较适合二进制或比较大的文件.
+对于src,从链接文件、world-writable或group-writable复制是不允许的.
+对于dst，如果目标文件不存在，则默认权限是0600,如果存在就覆盖掉<br><br>
+`domainname <name>`<br>
+设置 domain 的名字<br><br>
+`enable <servicename>`<br>
+将一个禁用的service设置为可用.
+如果这个service在运行，那么就会重启.
+一般用在bootloader时设置属性，然后启动一个service，比如
+```
+    on property:ro.boot.myfancyhardware=1
+        enable my_fancy_service_for_my_fancy_hardware
+```
+`exec [ <seclabel> [ <user> [ <group>\* ] ] ] -- <command> [ <argument>\* ]`
+新建子进程并运行一个带指定参数的命令. 这个命令指定了seclabel（安全策略），user(所有者)，group(用户组).
+直到这个命令运行完才可以运行其他命令，seclabel可以设置为 - 表示用默认值，argument表示属性值.
+直到子进程新建完毕，init进程才继续执行.<br><br>
+`exec_start <service>`<br>
+启动一个service，只有当执行结果返回，init进程才能继续执行. 这个跟exec相似，只是将一堆参数的设置改在在service中定义<br><br>
+`export <name> <value>`<br>
+设置环境变量name-value. 这个环境变量将被所有已经启动的service继承<br><br>
+`hostname <name>`<br>
+设置 host 的名字<br><br>
+`ifup <interface>`<br>
+开启指定的网络接口<br><br>
+`insmod [-f] <path> [<options>]`<br>
+安装path下的模块，指定参数options.<br>
+-f 表示强制安装，即便是当前Linux内核版本与之不匹配<br><br>
+`load_all_props`<br>
+加载/system, /vendor等目录下的属性，这个用在init.rc中<br><br>
+`load_persist_props`<br>
+加载/data 下的持久化属性. 这个用在init.rc中<br><br>
+`loglevel <level>`<br>
+设置日志输出等级，level表示等级<br><br>
+`mkdir <path> [mode] [owner] [group]`<br>
+创建一个目录，path是路径，mode是读写权限，默认值是755,owner是所有者，默认值root,group是用户组,默认值是root.
+如果该目录已存在，则覆盖他们的mode,owner等设置<br><br>
+`mount_all <fstab> [ <path> ]\* [--<option>]`<br>
+当手动触发 "early" 和 "late"时，调用fs\_mgr\_mount\_all 函数，指定fstab配置文件，并导入指定目录下的.rc文件
+详情可以查看init.rc文件中的有关定义<br><br>
+`mount <type> <device> <dir> [ <flag>\* ] [<options>]`<br>
+在dir目录下挂载一个名叫device的设备<br>
+_flag 包括 "ro", "rw", "remount", "noatime", ...<br>
+_options_ 包括 "barrier=1", "noauto\_da\_alloc", "discard", ... 用逗号分开，比如 barrier=1,noauto\_da\_alloc<br><br>
+`restart <service>`<br>
+终止后重启一个service,如果这个service刚被重启就什么都不做，如果没有在运行，就启动<br><br>
+`restorecon <path> [ <path>\* ]`<br>
+恢复指定目录下文件的安全上下文.第二个path是安全策略文件. 指定目录不需要必须存在，因为它只需要在init中正确标记<br><br>
+`restorecon_recursive <path> [ <path>\* ]`<br>
+递归地恢复指定目录下的安全上下文，第二个path是安全策略文件位置<br><br>
+`rm <path>`<br>
+调用 unlink(2)删除指定文件. 最好用exec -- rm ...代替，因为这样可以确系统分区已经挂载好<br><br>
+`rmdir <path>`<br>
+调用 rmdir(2) 删除指定目录<br><br>
+`setprop <name> <value>`<br>
+设置属性name-value<br><br>
+`setrlimit <resource> <cur> <max>`<br>
+指定一个进程的资源限制<br><br>
+`start <service>`<br>
+启动一个未运行的service<br><br>
+`stop <service>`<br>
+终止一个正在运行的service<br><br>
+`swapon_all <fstab>`<br>
+调用 fs\_mgr\_swapon\_all，指定fstab配置文件.<br><br>
+`symlink <target> <path>`<br>
+在path下创建一个指向target的链接<br><br>
+`sysclktz <mins_west_of_gmt>`<br>
+重置系统时钟为0<br><br>
+`trigger <event>`<br>
+触发事件 trigger，由一个action触发到另一个action队列<br><br>
+`umount <path>`<br>
+卸载指定path的文件系统<br><br>
+`verity_load_state`<br>
+内部实现是加载dm-verity的状态<br><br>
+`verity_update_state <mount-point>`<br>
+内部实现是设置dm-verity的状态，并且设置partition._mount-point_.verified的属性. 用adb重新挂载，
+因为fs\_mgr 不能直接设置它。<br><br>
+`wait <path> [ <timeout> ]`<br>
+查看指定路径是否存在. 如果发现则返回,可以设置超时时间，默认值是5秒<br><br>
+`wait_for_prop <name> <value>`<br>
+等待name属性的值被设置为value，如果name的值一旦被设置为value，马上继续<br><br>
+`write <path> <content>`<br>
+打开path下的文件，并用write(2)写入content内容. 如果文件不存在就会被创建，如果存在就会被覆盖掉<br><br>
+### Imports
+> import关键字不是一个命令，但是如果有.rc文件包含它就会马上解析它里面的section,用法如下：<br><br>
+`import <path>`<br>
+解析path下的.rc文件 ，括展当前文件的配置。如果path是个目录，这个目录下所有.rc文件都被解析，但是不会递归,
+import被用于以下两个地方：<br>
+1.在初始化时解析init.rc文件<br>
+2.在mount_all时解析{system,vendor,odm}/etc/init/等目录下的.rc文件
 
 ```C
 int main(int argc, char** argv) {
