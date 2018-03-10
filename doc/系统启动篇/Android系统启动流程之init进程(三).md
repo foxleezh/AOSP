@@ -98,7 +98,7 @@ Actions和Services可以作为一个独立的Section,所有的Commands和Options
 Actions和Services都是唯一的，如果定义了两个一样的Action，第二个Action的Command将追加到第一个Action，
 如果定义了两个一样的Service，第二个Service将被忽略掉并打印错误日志
 > ### Init .rc Files
-> Android Init Language是用后缀为.rc纯文本编写的,而且是由多个分布在不同目录下的.rc文件组成,如下所述 <br><br>
+> Android Init Language是用后缀为.rc的纯文本编写的,而且是由多个分布在不同目录下的.rc文件组成,如下所述 <br><br>
 /init.rc 是最主要的一个.rc文件，它由init进程在初始化时加载，主要负责系统初始化,它会导入 /init.${ro.hardware}.rc ，这个是系统级核心厂商提供的主要.rc文件<br><br>
 当执行 mount\_all 语句时，init进程将加载所有在 /{system,vendor,odm}/etc/init/ 目录下的文件，挂载好文件系统后，这些目录将会为Actions和Services服务<br><br>
 有一个特殊的目录可能被用来替换上面的三个默认目录，这主要是为了支持工厂模式和其他非标准的启动模式,上面三个目录用于正常的启动过程<br><br>
@@ -108,7 +108,7 @@ Actions和Services都是唯一的，如果定义了两个一样的Action，第�
 > 3. /odm/etc/init/ 用于设备制造商（odm定制厂商，如华为、小米），为他们的传感器或外围设备提供一些核心功能和服务<br><br>
 >
 > 所有放在这三个目录下的Services二进制文件都必须有一个对应的.rc文件放在该目录下，并且要在.rc文件中定义service结构,
-有一个宏LOCAL\_INIT\_RC,可以帮助开发者处理这个问题. 每个.rc文件还应当包含一些与之相关的actions<br><br>
+有一个宏LOCAL\_INIT\_RC,可以帮助开发者处理这个问题. 每个.rc文件还应当包含一些与该服务相关的actions<br><br>
 举个例子，在system/core/logcat目录下有logcatd.rc和Android.mk这两个文件. Android.mk文件中用LOCAL\_INIT\_RC这个宏，在编译时将logcatd.rc放在/system/etc/init/目录下,
 init进程在调用 mount\_all 时将其加载，在合适的时机运行其定义的service并将action放入队列<br><br>
 将init.rc根据不同服务分拆到不同目录，要比之前放在单个init.rc文件好. 这种方案确保init读取的service和action信息能和同目录下的Services二进制文件更加符合,不再像以前单个init.rc那样.
@@ -118,7 +118,7 @@ init进程在调用 mount\_all 时将其加载，在合适的时机运行其定�
 > ### Actions
 > Actions由一行行命令组成. trigger用来决定什么时候触发这些命令,当一个事件满足trigger的触发条件时，
 这个action就会被加入到处理队列中（除非队列中已经存在）<br><br>
-队列中的action按顺序取出执行，action中的命令按顺序执行. 这些命令的执行包含一些活动（设备创建/销毁，属性设置，进程重启）<br><br>
+队列中的action按顺序取出执行，action中的命令按顺序执行. 这些命令主要用来执行一些操作（设备创建/销毁，属性设置，进程重启）<br><br>
 Actions的格式如下：
 ```
     on <trigger> [&& <trigger>]*
@@ -135,7 +135,7 @@ Actions的格式如下：
        ...
 ```
 > ### Options
-> Options是对Services的参数. 它们影响Service如何运行及运行时机<br><br>
+> Options是Services的参数配置. 它们影响Service如何运行及运行时机<br><br>
 `console [<console>]`<br>
 Service需要控制台. 第二个参数console的意思是可以设置你想要的控制台类型，默认控制台是/dev/console ,
 /dev 这个前缀通常是被忽略的，比如你要设置控制台 /dev/tty0 ,那么只需要设置为console tty0<br><br>
@@ -148,13 +148,13 @@ Service需要控制台. 第二个参数console的意思是可以设置你想要�
 `socket <name> <type> <perm> [ <user> [ <group> [ <seclabel> ] ] ]`<br>
 创建一个unix域的socket,名字叫/dev/socket/_name_ , 并将fd返回给Service. _type_ 只能是 "dgram", "stream" or "seqpacket".
 User 和 group 默认值是 0. 'seclabel' 是这个socket的SELinux安全上下文,它的默认值是service安全策略或者基于其可执行文件的安全上下文.
-它对应的代码在libcutils的android\_get\_control\_socket<br><br>
+它对应的本地实现在libcutils的android\_get\_control\_socket<br><br>
 `file <path> <type>`<br>
-打开一个文件，并将fd返回给这个Service. _type_ 只能是 "r", "w" or "rw". 它对应的代码在libcutils的android\_get\_control\_file<br><br>
+打开一个文件，并将fd返回给这个Service. _type_ 只能是 "r", "w" or "rw". 它对应的本地实现在libcutils的android\_get\_control\_file<br><br>
 `user <username>`<br>
 在启动Service前将user改为username,默认启动时user为root(或许默认是无).
-在Android M版本，程序必须设置这个值，即使它想有root权限. 以前，一个程序要想有root权限，必须先以root身份运行，然后再降级到所需的uid.
-现在已经有一套新的机制取而代之，它通过fs\_config允许厂商赋予特殊二进制文件root权限. 这些说明文档在<http://source.android.com/devices/tech/config/filesystem.html>.
+在Android M版本，如果一个进程想拥有Linux capabilities（相当于Android中的权限吧），也只能通过设置这个值. 以前，一个程序要想有Linux capabilities，必须先以root身份运行，然后再降级到所需的uid.
+现在已经有一套新的机制取而代之，它通过fs\_config允许厂商赋予特殊二进制文件Linux capabilities. 这套机制的说明文档在<http://source.android.com/devices/tech/config/filesystem.html>.
 当使用这套新的机制时，程序可以通过user参数选择自己所需的uid,而不需要以root权限运行. 在Android O版本，
 程序可以通过capabilities参数直接申请所需的能力，参见下面的capabilities说明<br><br>
 `group <groupname> [ <groupname>\* ]`<br>
@@ -193,9 +193,9 @@ Triggers分为事件Trigger和属性Trigger<br><br>
 比如：<br>
 `on boot && property:a=b` 定义了action的触发条件是，boot Trigger触发，并且属性a的值等于b<br><br>
 `on property:a=b && property:c=d` 这个定义有三种触发方式:<br>
-> 1. 在初始化时，属性a=b,属性c=d.
-> 2. 在属性c=d的情况下，属性a被改为b.
-> 3. A在属性a=b的情况下，属性c被改为d.
+> 1. 在初始化时，属性a=b,属性c=d.<br>
+> 2. 在属性c=d的情况下，属性a被改为b.<br>
+> 3. A在属性a=b的情况下，属性c被改为d.<br>
 > ### Commands
 > `bootchart [start|stop]`<br>
 启动或终止bootcharting. 这个出现在init.rc文件中，但是只有在/data/bootchart/enabled文件存在的时候才有效，否则不能工作<br><br>
@@ -204,7 +204,8 @@ Triggers分为事件Trigger和属性Trigger<br><br>
 `chown <owner> <group> <path>`<br>
 修改文件所有者或所属用户组<br><br>
 `class_start <serviceclass>`<br>
-启动所有以serviceclass命名的未启动的service<br><br>
+启动所有以serviceclass命名的未启动的service(service有一个name，也有个class，
+这里的serviceclass就是class,class_start和后面的start是两种启动方式，class_start是class形式启动，start是name形式启动)<br><br>
 `class_stop <serviceclass>`<br>
 终止所有以serviceclass命名的正在运行的service<br><br>
 `class_reset <serviceclass>`<br>
@@ -212,11 +213,11 @@ Triggers分为事件Trigger和属性Trigger<br><br>
 `class_restart <serviceclass>`<br>
 重启所有以serviceclass命名的service<br><br>
 `copy <src> <dst>`<br>
-复制一个文件，与write相似，比较适合二进制或比较大的文件.
-对于src,从链接文件、world-writable或group-writable复制是不允许的.
+复制一个文件，与write相似，比较适合二进制或比较大的文件.<br>
+对于src,从链接文件、world-writable或group-writable复制是不允许的.<br>
 对于dst，如果目标文件不存在，则默认权限是0600,如果存在就覆盖掉<br><br>
 `domainname <name>`<br>
-设置 domain 的名字<br><br>
+设置域名<br><br>
 `enable <servicename>`<br>
 将一个禁用的service设置为可用.
 如果这个service在运行，那么就会重启.
@@ -232,7 +233,7 @@ on property:ro.boot.myfancyhardware=1
 `export <name> <value>`<br>
 设置环境变量name-value. 这个环境变量将被所有已经启动的service继承<br><br>
 `hostname <name>`<br>
-设置 host 的名字<br><br>
+设置主机名<br><br>
 `ifup <interface>`<br>
 开启指定的网络接口<br><br>
 `insmod [-f] <path> [<options>]`<br>
@@ -277,15 +278,15 @@ _options_ 包括 "barrier=1", "noauto\_da\_alloc", "discard", ... 用逗号分�
 `symlink <target> <path>`<br>
 在path下创建一个指向target的链接<br><br>
 `sysclktz <mins_west_of_gmt>`<br>
-重置系统时钟为0<br><br>
+重置系统基准时间(如果是格林尼治标准时间则设置为0)<br><br>
 `trigger <event>`<br>
-触发事件 trigger，由一个action触发到另一个action队列<br><br>
+触发事件event，由一个action触发到另一个action队列<br><br>
 `umount <path>`<br>
 卸载指定path的文件系统<br><br>
 `verity_load_state`<br>
 内部实现是加载dm-verity的状态<br><br>
 `verity_update_state <mount-point>`<br>
-内部实现是设置dm-verity的状态，并且设置partition._mount-point_.verified的属性. 用adb重新挂载，
+内部实现是设置dm-verity的状态，并且设置partition._mount-point_.verified的属性. 用于adb重新挂载，
 因为fs\_mgr 不能直接设置它。<br><br>
 `wait <path> [ <timeout> ]`<br>
 查看指定路径是否存在. 如果发现则返回,可以设置超时时间，默认值是5秒<br><br>
