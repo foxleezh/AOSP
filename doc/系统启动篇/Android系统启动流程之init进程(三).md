@@ -16,6 +16,7 @@ init.rc是init进程启动的配置脚本，这个脚本是用一种叫Android I
 ```
 platform/system/core/init/README.md
 platform/system/core/init/init.cpp
+platform/system/core/init/init_parser.cpp
 
 ```
 
@@ -304,6 +305,12 @@ import被用于以下两个地方：<br>
 > 后面的内容主要是一些跟调试init进程相关的东西，比如init.svc.<name>可以查看service启动的状态，
 ro.boottime.init记录一些关键的时间点，Bootcharting是一个图表化的性能监测工具等,由于与语法关系不大，就不作翻译了
 
+明白了.rc文件的语法，我们再来看看init进程是如何解析.rc文件，将这些语法转化为实际执行的代码的
+
+## 二、 解析.rc文件
+
+之前我们在文档中看到.rc文件主要有根目录下的 /init.rc ，以及{system,vendor,odm}/etc/init/这三个目录下的 *.rc ,
+然后就是如果有一个特殊目录被设置的话，就替代这些目录，明白这些，下面的代码就好理解了.
 
 ```C
 int main(int argc, char** argv) {
@@ -314,12 +321,12 @@ int main(int argc, char** argv) {
     /*
      * 1.C++中::表示静态方法调用，相当于java中static的方法
      */
-    Action::set_function_map(&function_map);
+    Action::set_function_map(&function_map); //将function_map存放到Action中作为成员属性
 
 
-    Parser& parser = Parser::GetInstance();//设置init.rc的解析器
+    Parser& parser = Parser::GetInstance();//单例模式，得到Parser对象
 	/*
-     * 1.C++中std::make_unique相当于new,它会返回一个std::unique_ptr，即智能指针
+     * 1.C++中std::make_unique相当于new,它会返回一个std::unique_ptr，即智能指针，可以自动管理内存
      * 2.unique_ptr持有对对象的独有权，两个unique_ptr不能指向一个对象，不能进行复制操作只能进行移动操作
      * 3.移动操作的函数是 p1=std::move(p) ,这样指针p指向的对象就移动到p1上了
      * 4.接下来的这三句代码都是new一个Parser（解析器），然后将它们放到一个map里存起来
@@ -342,7 +349,82 @@ int main(int argc, char** argv) {
         parser.set_is_vendor_etc_init_loaded(true);
         parser.set_is_odm_etc_init_loaded(true);
     }
+```
 
+
+### 2.1 ParseConfig
+定义在 platform/system/core/init/init_parser.cpp
+
+首先是判断传入的是目录还是文件，其实他们都是调用ParseConfigFile，ParseConfigDir就是遍历下该目录中的文件，对文件排个序,然后调用ParseConfigFile.
+而ParseConfigFile就是读取文件中的数据后，将数据传递给ParseData函数
+
+```C
+bool Parser::ParseConfig(const std::string& path) {
+    if (is_dir(path.c_str())) {
+        return ParseConfigDir(path);
+    }
+    return ParseConfigFile(path);
+}
+```
+
+ParseData 定义在 platform/system/core/init/init_parser.cpp
+
+```C
+void Parser::ParseData(const std::string& filename, const std::string& data) {
+    //TODO: Use a parser with const input and remove this copy
+    std::vector<char> data_copy(data.begin(), data.end());
+    data_copy.push_back('\0');
+
+    parse_state state;
+    state.filename = filename.c_str();
+    state.line = 0;
+    state.ptr = &data_copy[0];
+    state.nexttoken = 0;
+
+    SectionParser* section_parser = nullptr;
+    std::vector<std::string> args;
+
+    for (;;) {
+        switch (next_token(&state)) {
+        case T_EOF:
+            if (section_parser) {
+                section_parser->EndSection();
+            }
+            return;
+        case T_NEWLINE:
+            state.line++;
+            if (args.empty()) {
+                break;
+            }
+            if (section_parsers_.count(args[0])) {
+                if (section_parser) {
+                    section_parser->EndSection();
+                }
+                section_parser = section_parsers_[args[0]].get();
+                std::string ret_err;
+                if (!section_parser->ParseSection(args, &ret_err)) {
+                    parse_error(&state, "%s\n", ret_err.c_str());
+                    section_parser = nullptr;
+                }
+            } else if (section_parser) {
+                std::string ret_err;
+                if (!section_parser->ParseLineSection(args, state.filename,
+                                                      state.line, &ret_err)) {
+                    parse_error(&state, "%s\n", ret_err.c_str());
+                }
+            }
+            args.clear();
+            break;
+        case T_TEXT:
+            args.emplace_back(state.text);
+            break;
+        }
+    }
+}
+
+```
+
+```C
     // Turning this on and letting the INFO logging be discarded adds 0.2s to
     // Nexus 9 boot time, so it's disabled by default.
     if (false) parser.DumpState();
