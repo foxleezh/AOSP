@@ -22,7 +22,75 @@ platform/system/core/init/init.cpp
 ## 一、Android Init Language语法
 定义在platform/system/core/init/README.md
 
-源码中已经有一个专门的文档用来说明Android Init Language，应当说这个文档写得还是挺不错的,认真读这个文档的话，基本的语法知识就都知道了,我简单翻译下
+.rc文件主要配置了两个东西，一个是action,一个是service,trigger和command是对action的补充，options是service的补充.
+action加上trigger以及一些command,组成一个Section,service加上一些option，也组成一个Section ，.rc文件就是由一个个Section组成.
+.rc文件头部有一个import的语法，表示这些.rc也一并包含并解析,接下来我们重点讲下action和service.
+
+action的格式如下：
+```
+    on <trigger> [&& <trigger>]*
+       <command>
+       <command>
+       <command>
+```
+以on开头，trigger是判断条件，command是具体执行一些操作，当满足trigger条件时，执行这些command<br>
+trigger可以是一个字符串，如
+
+```C
+on early //表示当trigger early或QueueEventTrigger("early")调用时触发
+```
+也可以是属性，如
+```C
+on property:sys.boot_from_charger_mode=1//表示当sys.boot_from_charger_mode的值通过property_set设置为1时触发
+on property:sys.sysctl.tcp_def_init_rwnd=* // *表示任意值
+
+```
+条件可以是多个，用&&连接，如
+```C
+on zygote-start && property:ro.crypto.state=unencrypted
+//表示当zygote-start触发并且ro.crypto.state属性值为unencrypted时触发
+```
+command就是一些具体的操作，如
+```C
+mkdir /dev/fscklogs 0770 root system //新建目录
+class_stop charger //终止服务
+trigger late-init  //触发late-init
+```
+services的格式如下：
+```C
+    service <name> <pathname> [ <argument> ]*
+       <option>
+       <option>
+       ...
+```
+以service开头，name是指定这个服务的名称，pathname表示这个服务的执行文件路径，argument表示执行文件带的参数，option表示这个服务的一些配置
+我们看一个典型的例子就知道了
+```C
+service zygote /system/bin/app_process64 -Xzygote /system/bin --zygote --start-system-server --socket-name=zygote
+    class main
+    priority -20
+    user root
+    group root readproc
+    socket zygote stream 660 root system
+    onrestart write /sys/android_power/request_state wake
+    onrestart write /sys/power/state on
+    onrestart restart audioserver
+    onrestart restart cameraserver
+    onrestart restart media
+    onrestart restart netd
+    onrestart restart wificond
+    writepid /dev/cpuset/foreground/tasks
+```
+这个是配置在 /init.zygote64_32.rc文件中的service, 它就是我们常说的zygote进程的启动配置
+
+zygote是进程名，可执行文件路径在/system/bin/app_process64，执行文件参数（就是可执行程序main函数里面的那个args）是
+-Xzygote /system/bin --zygote --start-system-server --socket-name=zygote
+
+后面的option是一些服务配置，比如
+class main表示所属class是main，相当于一个归类，其他service也可以归为main，他们会被一起启动或终止，
+service有一个name，也有一个class，就像工作中，你有一个名字叫foxleezh，也可以说你属于android部门.
+
+我上面说的这些东西，源码中已经有一个专门的文档用来说明，应当说这个文档写得还是挺不错的,认真读这个文档的话，基本的语法知识就都知道了,我简单翻译下
 > ### Android Init Language
 > Android Init Language中由5类语法组成，分别是Actions, Commands, Services, Options, and Imports <br><br>
 每一行是一个语句，单词之间用空格分开，如果单词中有空格可以用反斜杠转义，也可以用双引号来引用文本避免和空格冲突，如果一行语句太长可以用 \ 换行，用 # 表示注释 <br><br>
@@ -193,7 +261,7 @@ _options_ 包括 "barrier=1", "noauto\_da\_alloc", "discard", ... 用逗号分�
 `restorecon_recursive <path> [ <path>\* ]`<br>
 递归地恢复指定目录下的安全上下文，第二个path是安全策略文件位置<br><br>
 `rm <path>`<br>
-调用 unlink(2)删除指定文件. 最好用exec -- rm ...代替，因为这样可以确系统分区已经挂载好<br><br>
+调用 unlink(2)删除指定文件. 最好用exec -- rm ...代替，因为这样可以确保系统分区已经挂载好<br><br>
 `rmdir <path>`<br>
 调用 rmdir(2) 删除指定目录<br><br>
 `setprop <name> <value>`<br>
@@ -231,7 +299,10 @@ _options_ 包括 "barrier=1", "noauto\_da\_alloc", "discard", ... 用逗号分�
 解析path下的.rc文件 ，括展当前文件的配置。如果path是个目录，这个目录下所有.rc文件都被解析，但是不会递归,
 import被用于以下两个地方：<br>
 > 1.在初始化时解析init.rc文件<br>
-> 2.在mount_all时解析{system,vendor,odm}/etc/init/等目录下的.rc文件
+> 2.在mount_all时解析{system,vendor,odm}/etc/init/等目录下的.rc文件<br><br>
+> 后面的内容主要是一些跟调试init进程相关的东西，比如init.svc.<name>可以查看service启动的状态，
+ro.boottime.init记录一些关键的时间点，Bootcharting是一个图表化的性能监测工具等,由于与语法关系不大，就不作翻译了
+
 
 ```C
 int main(int argc, char** argv) {
