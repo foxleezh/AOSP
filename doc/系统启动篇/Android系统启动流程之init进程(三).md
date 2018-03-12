@@ -18,9 +18,13 @@ platform/system/core/init/README.md
 platform/system/core/init/init.cpp
 platform/system/core/init/init_parser.cpp
 platform/system/core/init/action.cpp
+platform/system/core/init/action.h
 platform/system/core/init/keyword_map.h
 platform/system/core/init/builtins.cpp
-
+platform/system/core/init/service.cpp
+platform/system/core/init/service.h
+platform/system/core/init/import_parser.cpp
+platform/system/core/init/util.cpp
 ```
 
 ## 一、Android Init Language语法
@@ -94,7 +98,7 @@ zygote是进程名，可执行文件路径在/system/bin/app_process64，执行�
 class main表示所属class是main，相当于一个归类，其他service也可以归为main，他们会被一起启动或终止，
 service有一个name，也有一个class，就像工作中，你有一个名字叫foxleezh，也可以说你属于android部门.
 
-我上面说的这些东西，源码中已经有一个专门的文档用来说明，应当说这个文档写得还是挺不错的,认真读这个文档的话，基本的语法知识就都知道了,我简单翻译下
+我上面说的这些东西，源码中已经有一个专门的文档用来说明，路径在platform/system/core/init/README.md,应当说这个文档写得还是挺不错的,认真读这个文档的话，基本的语法知识就都知道了,我简单翻译下
 > ### Android Init Language
 > Android Init Language中由5类语法组成，分别是Actions, Commands, Services, Options, and Imports <br><br>
 每一行是一个语句，单词之间用空格分开，如果单词中有空格可以用反斜杠转义，也可以用双引号来引用文本避免和空格冲突，如果一行语句太长可以用 \ 换行，用 # 表示注释 <br><br>
@@ -359,14 +363,34 @@ int main(int argc, char** argv) {
 定义在 platform/system/core/init/init_parser.cpp
 
 首先是判断传入的是目录还是文件，其实他们都是调用ParseConfigFile，ParseConfigDir就是遍历下该目录中的文件，对文件排个序,然后调用ParseConfigFile.
-而ParseConfigFile就是读取文件中的数据后，将数据传递给ParseData函数
-
 ```C
 bool Parser::ParseConfig(const std::string& path) {
     if (is_dir(path.c_str())) {
         return ParseConfigDir(path);
     }
     return ParseConfigFile(path);
+}
+```
+而ParseConfigFile就是读取文件中的数据后，将数据传递给ParseData函数,最后遍历section_parsers_调用其EndFile函数，
+EndFile后面再分析，因为是多态实现，我们先看看ParseData
+
+```C
+bool Parser::ParseConfigFile(const std::string& path) {
+    LOG(INFO) << "Parsing file " << path << "...";
+    Timer t;
+    std::string data;
+    if (!read_file(path, &data)) { //将数据读取到data
+        return false;
+    }
+
+    data.push_back('\n'); // TODO: fix parse_config.
+    ParseData(path, data); //解析数据
+    for (const auto& sp : section_parsers_) {
+        sp.second->EndFile(path);
+    }
+
+    LOG(VERBOSE) << "(Parsing " << path << " took " << t << ".)";
+    return true;
 }
 ```
 
@@ -376,8 +400,6 @@ ParseData 定义在 platform/system/core/init/init_parser.cpp
 ParseData通过调用next_token函数遍历每一个字符，以空格或""为分割将一行拆分成若干个单词，调用T_TEXT放到args数组中，
 当读到回车符就调用T_NEWLINE，在section_parsers_这个map中找到对应的on service import的解析器，执行ParseSection，如果在
 map中找不到对应的key，就执行ParseLineSection，当读到0的时候，表示文件读取结束，调用T_EOF执行EndSection.
-
-
 
 ```C
 void Parser::ParseData(const std::string& filename, const std::string& data) {
@@ -439,7 +461,7 @@ void Parser::ParseData(const std::string& filename, const std::string& data) {
 
 ```
 
-这里其实涉及到on service import对应的三个解析器ActionParser,ServiceParser,ImportParser,它们都是SectionParser的子类，它们是在之前加入到section_parsers_这个map中的
+这里其实涉及到on service import对应的三个解析器ActionParser,ServiceParser,ImportParser,它们是在之前加入到section_parsers_这个map中的
 ```C
     Parser& parser = Parser::GetInstance();
     parser.AddSectionParser("service",std::make_unique<ServiceParser>());
@@ -449,9 +471,30 @@ void Parser::ParseData(const std::string& filename, const std::string& data) {
     void Parser::AddSectionParser(const std::string& name,
                                   std::unique_ptr<SectionParser> parser) {
         section_parsers_[name] = std::move(parser);
-    } 
+    }
 ```
-接下来我将分析这三个Perser的ParseSection、ParseLineSection、EndSection具体实现
+
+它们都是SectionParser的子类,SectionParser有四个纯虚函数，分别是ParseSection、ParseLineSection、EndSection，EndFile.
+```C
+class SectionParser {
+public:
+    virtual ~SectionParser() {
+    }
+    /*
+     * 1.C++中纯虚函数的定义格式是 virtual作为修饰符，然后赋值给0，相当于Java中的抽象方法
+     * 2.如果不赋值给0,却以virtual作为修饰符，这种是虚函数，虚函数可以有方法体，相当于Java中父类的方法，主要用于子类的重载
+     * 3.只要包含纯虚函数的类就是抽象类，不能new，只能通过子类实现，这个跟Java一样
+     */
+    virtual bool ParseSection(const std::vector<std::string>& args,
+                              std::string* err) = 0;
+    virtual bool ParseLineSection(const std::vector<std::string>& args,
+                                  const std::string& filename, int line,
+                                  std::string* err) const = 0;
+    virtual void EndSection() = 0;
+    virtual void EndFile(const std::string& filename) = 0;
+};
+```
+接下来我将分析这三个Perser的ParseSection、ParseLineSection、EndSection，EndFile具体实现
 
 ### 2.3 ActionParser
 定义在platform/system/core/init/action.cpp
@@ -663,7 +706,7 @@ BuiltinFunctionMap::Map& BuiltinFunctionMap::map() const {
 
 ```
 
-最后我们来看看EndSection,直接是调用ActionManager::GetInstance().AddAction
+接下来我们看看EndSection,直接是调用ActionManager::GetInstance().AddAction
 
 ```C
 void ActionParser::EndSection() {
@@ -680,27 +723,341 @@ void ActionManager::AddAction(std::unique_ptr<Action> action) {
         std::find_if(actions_.begin(), actions_.end(),
                      [&action] (std::unique_ptr<Action>& a) {
                          return action->TriggersEqual(*a);
-                     });//find_if是集合中用于比较的模板，
+                     });//find_if是集合中用于比较的模板，上面这种写法是lambda表达式
 
-    if (old_action_it != actions_.end()) {
+    if (old_action_it != actions_.end()) {//在数组actions中找到Action说明已经存在同名，就合并command
         (*old_action_it)->CombineAction(*action);
-    } else {
+    } else { //找不到就加入数组
         actions_.emplace_back(std::move(action));
     }
 }
 
 bool Action::TriggersEqual(const Action& other) const {
     return property_triggers_ == other.property_triggers_ &&
-        event_trigger_ == other.event_trigger_;
+        event_trigger_ == other.event_trigger_;//比较之前记录的event trigger和property trigger
 }
 
 void Action::CombineAction(const Action& action) {
-    for (const auto& c : action.commands_) {
+    for (const auto& c : action.commands_) { //将新的Action中的command合并到老的Action
         commands_.emplace_back(c);
     }
 }
 ```
 
+EndFile是一个空实现,定义在platform/system/core/init/action.h
+```C
+class ActionParser : public SectionParser {
+public:
+    ActionParser() : action_(nullptr) {
+    }
+    bool ParseSection(const std::vector<std::string>& args,
+                      std::string* err) override;
+    bool ParseLineSection(const std::vector<std::string>& args,
+                          const std::string& filename, int line,
+                          std::string* err) const override;
+    void EndSection() override;
+    void EndFile(const std::string&) override { //空实现
+    }
+private:
+    std::unique_ptr<Action> action_;
+};
+```
+
+讲了这么多，小结一下ActionParser做的事情. 它有三个重要的重载函数，ParseSection、ParseLineSection、EndSection.
+
+- ParseSection函数的作用是构造一个Action对象，将trigger条件记录到Action这个对象中
+- ParseLineSection作用是根据命令在一个map中找到对应的执行函数，然后将信息记录到之前构造的Action中
+- EndSection作用是将前两步构造的Action存入一个数组中，存入之前比较下数组中是否已经存在同名的Action，如果有就合并command
+
+### 2.4 ServiceParser
+定义在platform/system/core/init/service.cpp
+
+我们还是分析它的四个函数ParseSection、ParseLineSection、EndSection、EndFile
+
+ParseSection首先是判断单词个数至少有三个，因为必须有一个服务名称和执行文件,然后是判断名称是否合法，主要是一些长度及内容的检查，最后就是构造一个Service对象
+```C
+bool ServiceParser::ParseSection(const std::vector<std::string>& args,
+                                 std::string* err) {
+    if (args.size() < 3) { // 传入单词个数至少三个
+        *err = "services must have a name and a program";
+        return false;
+    }
+
+    const std::string& name = args[1];
+    if (!IsValidName(name)) {//检查名称是否合法
+        *err = StringPrintf("invalid service name '%s'", name.c_str());
+        return false;
+    }
+
+    std::vector<std::string> str_args(args.begin() + 2, args.end());
+    service_ = std::make_unique<Service>(name, str_args);// 构造Service对象
+    return true;
+}
+```
+
+ParseLineSection直接执行Service的ParseLine函数
+```C
+bool ServiceParser::ParseLineSection(const std::vector<std::string>& args,
+                                     const std::string& filename, int line,
+                                     std::string* err) const {
+    return service_ ? service_->ParseLine(args, err) : false;
+}
+```
+
+ParseLine的思路跟之前Action一样，就是根据option名称从map中找到对应的执行函数,然后执行这个函数.
+这些执行函数主要作用就是对传入参数做一些处理，然后将信息记录到Service对象中
+
+```C
+bool Service::ParseLine(const std::vector<std::string>& args, std::string* err) {
+    if (args.empty()) {
+        *err = "option needed, but not provided";
+        return false;
+    }
+
+    static const OptionParserMap parser_map;
+    auto parser = parser_map.FindFunction(args[0], args.size() - 1, err);//从map中找出执行函数
+
+    if (!parser) {
+        return false;
+    }
+
+    return (this->*parser)(args, err);//执行找到的这个函数
+}
+```
+
+map()返回的map如下,定义在定义在platform/system/core/init/service.cpp中
+
+```C
+Service::OptionParserMap::Map& Service::OptionParserMap::map() const {
+    constexpr std::size_t kMax = std::numeric_limits<std::size_t>::max();
+    // clang-format off
+    static const Map option_parsers = {
+        {"capabilities",
+                        {1,     kMax, &Service::ParseCapabilities}},
+        {"class",       {1,     kMax, &Service::ParseClass}},
+        {"console",     {0,     1,    &Service::ParseConsole}},
+        {"critical",    {0,     0,    &Service::ParseCritical}},
+        {"disabled",    {0,     0,    &Service::ParseDisabled}},
+        {"group",       {1,     NR_SVC_SUPP_GIDS + 1, &Service::ParseGroup}},
+        {"ioprio",      {2,     2,    &Service::ParseIoprio}},
+        {"priority",    {1,     1,    &Service::ParsePriority}},
+        {"keycodes",    {1,     kMax, &Service::ParseKeycodes}},
+        {"oneshot",     {0,     0,    &Service::ParseOneshot}},
+        {"onrestart",   {1,     kMax, &Service::ParseOnrestart}},
+        {"oom_score_adjust",
+                        {1,     1,    &Service::ParseOomScoreAdjust}},
+        {"namespace",   {1,     2,    &Service::ParseNamespace}},
+        {"seclabel",    {1,     1,    &Service::ParseSeclabel}},
+        {"setenv",      {2,     2,    &Service::ParseSetenv}},
+        {"socket",      {3,     6,    &Service::ParseSocket}},
+        {"file",        {2,     2,    &Service::ParseFile}},
+        {"user",        {1,     1,    &Service::ParseUser}},
+        {"writepid",    {1,     kMax, &Service::ParseWritepid}},
+    };
+    // clang-format on
+    return option_parsers;
+}
+```
+
+接下来我们看看EndSection，直接调用ServiceManager的AddService函数
+
+```C
+void ServiceParser::EndSection() {
+    if (service_) {
+        ServiceManager::GetInstance().AddService(std::move(service_));
+    }
+}
+```
+
+AddService的实现比较简单，就是通过比较service的name，查看存放Service的数组services_中是否有同名的service，如果有就打印下错误日志，直接返回，
+如果不存在就加入数组中
+```C
+void ServiceManager::AddService(std::unique_ptr<Service> service) {
+    Service* old_service = FindServiceByName(service->name()); //查找services_中是否已存在同名service
+    if (old_service) {
+        LOG(ERROR) << "ignored duplicate definition of service '" << service->name() << "'";
+        return;
+    }
+    services_.emplace_back(std::move(service));//加入数组
+}
+
+Service* ServiceManager::FindServiceByName(const std::string& name) const {
+    auto svc = std::find_if(services_.begin(), services_.end(),
+                            [&name] (const std::unique_ptr<Service>& s) {
+                                return name == s->name();
+                            });//跟之前action一样，遍历数组进行比较，查找同名service
+    if (svc != services_.end()) {
+        return svc->get(); //找到就返回service
+    }
+    return nullptr;
+}
+```
+
+EndFile依然是一个空实现,定义在platform/system/core/init/service.h
+```C
+class ServiceParser : public SectionParser {
+public:
+    ServiceParser() : service_(nullptr) {
+    }
+    bool ParseSection(const std::vector<std::string>& args,
+                      std::string* err) override;
+    bool ParseLineSection(const std::vector<std::string>& args,
+                          const std::string& filename, int line,
+                          std::string* err) const override;
+    void EndSection() override;
+    void EndFile(const std::string&) override { //空实现
+    }
+private:
+    bool IsValidName(const std::string& name) const;
+
+    std::unique_ptr<Service> service_;
+};
+```
+
+从上面可以看出，ServiceParser的处理跟ActionParser差不多，区别在于Action将执行函数存起来等待Trigger触发时执行，Service找到执行函数后是马上执行
+
+### 2.4 ImportParser
+定义在platform/system/core/init/import_parser.cpp
+
+最后我们看看ImportParser，ImportParser的ParseLineSection、EndSection都是空实现，只实现了ParseSection和EndFile,
+因为它的语法比较单一，只有一行. 我们来看看它的ParseSection函数
+
+首先检查单词只能是两个，因为只能是import xxx 这种语法，然后调用expand_props处理下参数，最后将结果放入数组imports_存起来
+```C
+bool ImportParser::ParseSection(const std::vector<std::string>& args,
+                                std::string* err) {
+    if (args.size() != 2) { //检查参数只能是两个
+        *err = "single argument needed for import\n";
+        return false;
+    }
+
+    std::string conf_file;
+    bool ret = expand_props(args[1], &conf_file); //处理第二个参数
+    if (!ret) {
+        *err = "error while expanding import";
+        return false;
+    }
+
+    LOG(INFO) << "Added '" << conf_file << "' to import list";
+    imports_.emplace_back(std::move(conf_file)); //存入数组
+    return true;
+}
+```
+
+expand_props 定义在platform/system/core/init/util.cpp ，主要作用就是找到${x.y}或$x.y这种语法，将x.y取出来作为name，去属性系统中找对应的value，然后替换
+
+```C
+bool expand_props(const std::string& src, std::string* dst) {
+    const char* src_ptr = src.c_str();
+
+    if (!dst) {
+        return false;
+    }
+
+    /* - variables can either be $x.y or ${x.y}, in case they are only part
+     *   of the string.
+     * - will accept $$ as a literal $.
+     * - no nested property expansion, i.e. ${foo.${bar}} is not supported,
+     *   bad things will happen
+     * - ${x.y:-default} will return default value if property empty.
+     */
+    //这段英文大概的意思是 参数要么是$x.y，要么是${x.y}，它们都是路径的一部分，$$表示字符 $ ,
+    //${foo.${bar}}这种递归写法是不支持的，因为会发生一些糟糕的事情
+    //${x.y:-default}会将default作为默认值返回，如果找不到对应的属性值的话
+    while (*src_ptr) {
+        const char* c;
+
+        c = strchr(src_ptr, '$');
+        if (!c) { // 找不到$符号，直接将dst赋值为src返回
+            dst->append(src_ptr);
+            return true;
+        }
+
+        dst->append(src_ptr, c);
+        c++;
+
+        if (*c == '$') { //跳过$
+            dst->push_back(*(c++));
+            src_ptr = c;
+            continue;
+        } else if (*c == '\0') {
+            return true;
+        }
+
+        std::string prop_name;
+        std::string def_val;
+        if (*c == '{') { //找到 { 就准备找 }的下标，然后截取它们之间的字符串，对应${x.y}的情况
+            c++;
+            const char* end = strchr(c, '}');
+            if (!end) {
+                // failed to find closing brace, abort.
+                LOG(ERROR) << "unexpected end of string in '" << src << "', looking for }";
+                return false;
+            }
+            prop_name = std::string(c, end); //截取{}之间的字符串作为name
+            c = end + 1;
+            size_t def = prop_name.find(":-"); //如果发现有 ":-" ,就将后面的值作为默认值先存起来
+            if (def < prop_name.size()) {
+                def_val = prop_name.substr(def + 2);
+                prop_name = prop_name.substr(0, def);
+            }
+        } else { //对应$x.y的情况
+            prop_name = c;
+            LOG(ERROR) << "using deprecated syntax for specifying property '" << c << "', use ${name} instead";
+            c += prop_name.size();
+        }
+
+        if (prop_name.empty()) {
+            LOG(ERROR) << "invalid zero-length property name in '" << src << "'";
+            return false;
+        }
+
+        std::string prop_val = android::base::GetProperty(prop_name, ""); //通过name在属性系统中找对应的value，内部调用的是之前属性系统的__system_property_find函数
+        if (prop_val.empty()) { //没有找到值就返回默认值
+            if (def_val.empty()) {
+                LOG(ERROR) << "property '" << prop_name << "' doesn't exist while expanding '" << src << "'";
+                return false;
+            }
+            prop_val = def_val;
+        }
+
+        dst->append(prop_val);
+        src_ptr = c;
+    }
+
+    return true;
+}
+```
+
+EndFile的实现比较简单，就是复制下ParseSection函数解析的.rc文件数组，然后遍历数组，调用最开始的ParseConfig函数解析一个完整的路径
+
+```C
+void ImportParser::EndFile(const std::string& filename) {
+    auto current_imports = std::move(imports_);
+    imports_.clear();
+    for (const auto& s : current_imports) {
+        if (!Parser::GetInstance().ParseConfig(s)) {
+            PLOG(ERROR) << "could not import file '" << s << "' from '" << filename << "'";
+        }
+    }
+}
+```
+
+由此，我们将Android Init Language语法的转化过程分析完毕，其实它们核心的解析器就三个，ActionParser,ServiceParser，ImportParser.
+而这几个解析器主要是实现ParseSection、ParseLineSection、EndSection、EndFile四个函数
+- ParseSection用于解析Section的第一行，比如
+```C
+on early
+service ueventd /sbin/ueventd
+import /init.${ro.zygote}.rc
+```
+- ParseLineSection用于解析Section的command或option,比如
+```C
+write /proc/1/oom_score_adj -1000
+class core
+```
+- EndSection用于处理Action和Service同名的情况，以及将解析的对象存入数组备用
+- EndFile只有在ImportParser中有用到，主要是解析导入的.rc文件
 
 ```C
     // Turning this on and letting the INFO logging be discarded adds 0.2s to
