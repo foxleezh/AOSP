@@ -2,21 +2,14 @@
 
 ### 1.String相关函数
 
-#### 1.1 strcmp
-比较两个字符串,设这两个字符串为str1，str2<br>
-若str1==str2，则返回零<br>
-若str1 < str2，则返回负数<br>
-若str1 > str2，则返回正数<br>
+| 参数 | 含义 |
+| :-- | :-- |
+| strcmp   |   比较两个字符串,相同返回0 |
+| strcspn   |   返回字符所在下标,相当于String的indexof |
+| clear   |   清空字符串 |
+| erase   |   删除指定范围的字符 |
+| reserve   |   将字符串的容量设置为至少size. 如果size指定的数值要小于当前字符串中的字符数, 容量将被设置为可以恰好容纳字符的数值. |
 
-#### 1.2 clear
-清空字符串
-#### 1.3 reserve
-函数reserve()将字符串的容量设置为至少size. 如果size指定的数值要小于当前字符串中的字符数, 容量将被设置为可以恰好容纳字符的数值.
-#### 1.4 strcspn
-strcspn用于返回字符所在下标,相当于String的indexof
-```
-size_t entry_key_len = strcspn(ENV[n], "=");
-```
 
 ### 2.文件读写
 #### 2.1 access
@@ -34,6 +27,17 @@ size_t entry_key_len = strcspn(ENV[n], "=");
 | O_CREAT      |   如果文件不存在就创建一个 |
 | O_CLOEXEC     |  即当调用exec（）函数成功后，文件描述符会自动关闭,且为原子操作。 |
 | O_BINARY     |   以二进制方式打开 |
+
+### 3.集合类
+
+#### 3.1 std::map
+与Java中的Map类似
+
+| 方法 | 含义 |
+| :-- | :-- |
+| count    |   查找map是否包含这个key，相当于contains |
+| emplace    |   插入数据，相当于put |
+
 
 ### 其他
 
@@ -64,3 +68,6 @@ class MyTemplateClass
 ```
 
 我们可以把模板看作Java中的泛型
+
+#### 2.返回编译器允许最大值
+numeric_limits<int>::max () ，返回int最大值

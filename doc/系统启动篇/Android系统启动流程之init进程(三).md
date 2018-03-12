@@ -17,6 +17,9 @@ init.rc是init进程启动的配置脚本，这个脚本是用一种叫Android I
 platform/system/core/init/README.md
 platform/system/core/init/init.cpp
 platform/system/core/init/init_parser.cpp
+platform/system/core/init/action.cpp
+platform/system/core/init/keyword_map.h
+platform/system/core/init/builtins.cpp
 
 ```
 
@@ -367,15 +370,22 @@ bool Parser::ParseConfig(const std::string& path) {
 }
 ```
 
+### 2.2 ParseData
 ParseData 定义在 platform/system/core/init/init_parser.cpp
+
+ParseData通过调用next_token函数遍历每一个字符，以空格或""为分割将一行拆分成若干个单词，调用T_TEXT放到args数组中，
+当读到回车符就调用T_NEWLINE，在section_parsers_这个map中找到对应的on service import的解析器，执行ParseSection，如果在
+map中找不到对应的key，就执行ParseLineSection，当读到0的时候，表示文件读取结束，调用T_EOF执行EndSection.
+
+
 
 ```C
 void Parser::ParseData(const std::string& filename, const std::string& data) {
     //TODO: Use a parser with const input and remove this copy
-    std::vector<char> data_copy(data.begin(), data.end());
-    data_copy.push_back('\0');
+    std::vector<char> data_copy(data.begin(), data.end()); //将data的内容复制到data_copy中
+    data_copy.push_back('\0'); //追加一个结束符0
 
-    parse_state state;
+    parse_state state; //定义一个结构体
     state.filename = filename.c_str();
     state.line = 0;
     state.ptr = &data_copy[0];
@@ -385,37 +395,42 @@ void Parser::ParseData(const std::string& filename, const std::string& data) {
     std::vector<std::string> args;
 
     for (;;) {
-        switch (next_token(&state)) {
-        case T_EOF:
+        switch (next_token(&state)) { // 遍历data_copy中每一个字符
+        case T_EOF: //如果是文件结尾，则调用EndSection
             if (section_parser) {
                 section_parser->EndSection();
             }
             return;
-        case T_NEWLINE:
+        case T_NEWLINE://读取了一行数据
             state.line++;
             if (args.empty()) {
                 break;
             }
-            if (section_parsers_.count(args[0])) {
+            /*
+             * 1.section_parsers_是一个std:map
+             * 2.C++中std:map的count函数是查找key，相当于Java中Map的contains
+             * 3.section_parsers_中只有三个key，on service import,之前AddSectionParser函数加入
+             */
+            if (section_parsers_.count(args[0])) { //判断是否包含 on service import
                 if (section_parser) {
                     section_parser->EndSection();
                 }
-                section_parser = section_parsers_[args[0]].get();
+                section_parser = section_parsers_[args[0]].get();//取出对应的parser
                 std::string ret_err;
-                if (!section_parser->ParseSection(args, &ret_err)) {
+                if (!section_parser->ParseSection(args, &ret_err)) {//解析对应的Section
                     parse_error(&state, "%s\n", ret_err.c_str());
                     section_parser = nullptr;
                 }
-            } else if (section_parser) {
+            } else if (section_parser) { //不包含 on service import则是command或option
                 std::string ret_err;
                 if (!section_parser->ParseLineSection(args, state.filename,
-                                                      state.line, &ret_err)) {
+                                                      state.line, &ret_err)) {//解析command或option
                     parse_error(&state, "%s\n", ret_err.c_str());
                 }
             }
             args.clear();
             break;
-        case T_TEXT:
+        case T_TEXT: //将读取的一行数据放到args中，args以空格或""作为分割，将一行数据拆分成单词放进数组中
             args.emplace_back(state.text);
             break;
         }
@@ -423,6 +438,269 @@ void Parser::ParseData(const std::string& filename, const std::string& data) {
 }
 
 ```
+
+这里其实涉及到on service import对应的三个解析器ActionParser,ServiceParser,ImportParser,它们都是SectionParser的子类，它们是在之前加入到section_parsers_这个map中的
+```C
+    Parser& parser = Parser::GetInstance();
+    parser.AddSectionParser("service",std::make_unique<ServiceParser>());
+    parser.AddSectionParser("on", std::make_unique<ActionParser>());
+    parser.AddSectionParser("import", std::make_unique<ImportParser>());
+
+    void Parser::AddSectionParser(const std::string& name,
+                                  std::unique_ptr<SectionParser> parser) {
+        section_parsers_[name] = std::move(parser);
+    } 
+```
+接下来我将分析这三个Perser的ParseSection、ParseLineSection、EndSection具体实现
+
+### 2.3 ActionParser
+定义在platform/system/core/init/action.cpp
+
+我们先看ParseSection，它先将args中下标1到结尾的数据复制到triggers数组中，实际是调用InitTriggers,将处理结果赋值给action_
+```C
+bool ActionParser::ParseSection(const std::vector<std::string>& args,
+                                std::string* err) {
+    std::vector<std::string> triggers(args.begin() + 1, args.end()); //将args复制到triggers中，除去下标0
+    if (triggers.size() < 1) {
+        *err = "actions must have a trigger";
+        return false;
+    }
+
+    auto action = std::make_unique<Action>(false);
+    if (!action->InitTriggers(triggers, err)) { //调用InitTriggers
+        return false;
+    }
+
+    action_ = std::move(action);
+    return true;
+}
+```
+
+InitTriggers通过比较是否以"property:"开头，区分trigger的类型，如果是property trigger，就调用ParsePropertyTrigger，
+如果是event trigger,就将args的参数赋值给event_trigger_，类型是string
+```C
+bool Action::InitTriggers(const std::vector<std::string>& args, std::string* err) {
+    const static std::string prop_str("property:");
+    for (std::size_t i = 0; i < args.size(); ++i) {
+
+        ...
+
+        if (!args[i].compare(0, prop_str.length(), prop_str)) {
+            if (!ParsePropertyTrigger(args[i], err)) {
+                return false;
+            }
+        } else {
+           ...
+            event_trigger_ = args[i];
+        }
+    }
+
+    return true;
+}
+```
+
+ParsePropertyTrigger函数先是将字符以"="分割为name-value，然后将name-value存入property_triggers_这个map中
+```C
+bool Action::ParsePropertyTrigger(const std::string& trigger, std::string* err) {
+    const static std::string prop_str("property:");
+    std::string prop_name(trigger.substr(prop_str.length())); //截取property:后的内容
+    size_t equal_pos = prop_name.find('=');
+    if (equal_pos == std::string::npos) {
+        *err = "property trigger found without matching '='";
+        return false;
+    }
+
+    std::string prop_value(prop_name.substr(equal_pos + 1)); //取出value
+    prop_name.erase(equal_pos); //删除下标为equal_pos的字符，也就是删除"="
+
+    if (auto [it, inserted] = property_triggers_.emplace(prop_name, prop_value); !inserted) {
+    //将name-value存放到map中，emplace相当于put操作
+        *err = "multiple property triggers found for same property";
+        return false;
+    }
+    return true;
+}
+```
+
+从上面看出，ParseSection函数的作用就是构造一个Action对象，将trigger条件记录到Action这个对象中，如果是event trigger就赋值给event_trigger_，
+如果是property trigger就存放到property_triggers_这个map中. 接下来我们分析ParseLineSection
+
+ParseLineSection是直接调用Action对象的AddCommand函数
+```C
+bool ActionParser::ParseLineSection(const std::vector<std::string>& args,
+                                    const std::string& filename, int line,
+                                    std::string* err) const {
+    return action_ ? action_->AddCommand(args, filename, line, err) : false;
+}
+```
+
+AddCommand看名字就大概知道是添加命令，它首先是做一些参数空值的检查，然后是调用FindFunction查找命令对应的执行函数，
+最后将这些信息包装成Command对象存放到commands_数组中，这里比较关键的就是FindFunction
+
+```C
+bool Action::AddCommand(const std::vector<std::string>& args,
+                        const std::string& filename, int line, std::string* err) {
+    ... //一些参数检查
+
+    auto function = function_map_->FindFunction(args[0], args.size() - 1, err);//查找命令对应的执行函数
+    if (!function) {
+        return false;
+    }
+
+    AddCommand(function, args, filename, line);
+    return true;
+}
+
+void Action::AddCommand(BuiltinFunction f,
+                        const std::vector<std::string>& args,
+                        const std::string& filename, int line) {
+    commands_.emplace_back(f, args, filename, line);//commands_是个数组，emplace_back就相当于add
+}
+```
+
+FindFunction定义在platform/system/core/init/keyword_map.h
+
+这个函数主要作用是通过命令查找对应的执行函数，比如.rc文件中定义chmod,那我们得找到chmod具体去执行哪个函数. 它首先是通过map()返回一个std:map，调用其find函数，
+find相当于Java中的get，但是返回的是entry,可以通过entry ->first和entry ->second获取key-value.
+找到的value是一个结构体，里面有三个值，第一个是参数最小数目，第二个是参数最大数目，第三个就是执行函数，
+之后作了参数的数目检查，也就是说命令后的参数要在最小值和最大值之间.
+
+```C
+const Function FindFunction(const std::string& keyword,
+                                size_t num_args,
+                                std::string* err) const {
+        using android::base::StringPrintf;
+
+        auto function_info_it = map().find(keyword); //找到keyword对应的entry
+        if (function_info_it == map().end()) { // end是最后一个元素后的元素，表示找不到
+            *err = StringPrintf("invalid keyword '%s'", keyword.c_str());
+            return nullptr;
+        }
+
+        auto function_info = function_info_it->second;//获取value
+
+        auto min_args = std::get<0>(function_info);//获取参数数量最小值
+        auto max_args = std::get<1>(function_info);//获取参数数量最大值
+        if (min_args == max_args && num_args != min_args) {//将实际参数数量与最大值最小值比较
+            *err = StringPrintf("%s requires %zu argument%s",
+                                keyword.c_str(), min_args,
+                                (min_args > 1 || min_args == 0) ? "s" : "");
+            return nullptr;
+        }
+
+        if (num_args < min_args || num_args > max_args) {
+            if (max_args == std::numeric_limits<decltype(max_args)>::max()) {
+                *err = StringPrintf("%s requires at least %zu argument%s",
+                                    keyword.c_str(), min_args,
+                                    min_args > 1 ? "s" : "");
+            } else {
+                *err = StringPrintf("%s requires between %zu and %zu arguments",
+                                    keyword.c_str(), min_args, max_args);
+            }
+            return nullptr;
+        }
+
+        return std::get<Function>(function_info);//返回命令对应的执行函数
+    }
+```
+
+我们看看map()的实现,定义在platform/system/core/init/builtins.cpp
+
+这个实现比较简单，就是直接构造一个map，然后返回. 比如{"bootchart", {1,1,do_bootchart}},
+表示命令名称叫bootchart，对应的执行函数是do_bootchart，允许传入的最小和最大参数数量是1
+```C
+BuiltinFunctionMap::Map& BuiltinFunctionMap::map() const {
+    constexpr std::size_t kMax = std::numeric_limits<std::size_t>::max(); //表示size_t的最大值
+    // clang-format off
+    static const Map builtin_functions = {
+        {"bootchart",               {1,     1,    do_bootchart}},
+        {"chmod",                   {2,     2,    do_chmod}},
+        {"chown",                   {2,     3,    do_chown}},
+        {"class_reset",             {1,     1,    do_class_reset}},
+        {"class_restart",           {1,     1,    do_class_restart}},
+        {"class_start",             {1,     1,    do_class_start}},
+        {"class_stop",              {1,     1,    do_class_stop}},
+        {"copy",                    {2,     2,    do_copy}},
+        {"domainname",              {1,     1,    do_domainname}},
+        {"enable",                  {1,     1,    do_enable}},
+        {"exec",                    {1,     kMax, do_exec}},
+        {"exec_start",              {1,     1,    do_exec_start}},
+        {"export",                  {2,     2,    do_export}},
+        {"hostname",                {1,     1,    do_hostname}},
+        {"ifup",                    {1,     1,    do_ifup}},
+        {"init_user0",              {0,     0,    do_init_user0}},
+        {"insmod",                  {1,     kMax, do_insmod}},
+        {"installkey",              {1,     1,    do_installkey}},
+        {"load_persist_props",      {0,     0,    do_load_persist_props}},
+        {"load_system_props",       {0,     0,    do_load_system_props}},
+        {"loglevel",                {1,     1,    do_loglevel}},
+        {"mkdir",                   {1,     4,    do_mkdir}},
+        {"mount_all",               {1,     kMax, do_mount_all}},
+        {"mount",                   {3,     kMax, do_mount}},
+        {"umount",                  {1,     1,    do_umount}},
+        {"restart",                 {1,     1,    do_restart}},
+        {"restorecon",              {1,     kMax, do_restorecon}},
+        {"restorecon_recursive",    {1,     kMax, do_restorecon_recursive}},
+        {"rm",                      {1,     1,    do_rm}},
+        {"rmdir",                   {1,     1,    do_rmdir}},
+        {"setprop",                 {2,     2,    do_setprop}},
+        {"setrlimit",               {3,     3,    do_setrlimit}},
+        {"start",                   {1,     1,    do_start}},
+        {"stop",                    {1,     1,    do_stop}},
+        {"swapon_all",              {1,     1,    do_swapon_all}},
+        {"symlink",                 {2,     2,    do_symlink}},
+        {"sysclktz",                {1,     1,    do_sysclktz}},
+        {"trigger",                 {1,     1,    do_trigger}},
+        {"verity_load_state",       {0,     0,    do_verity_load_state}},
+        {"verity_update_state",     {0,     0,    do_verity_update_state}},
+        {"wait",                    {1,     2,    do_wait}},
+        {"wait_for_prop",           {2,     2,    do_wait_for_prop}},
+        {"write",                   {2,     2,    do_write}},
+    };
+    // clang-format on
+    return builtin_functions;
+}
+
+```
+
+最后我们来看看EndSection,直接是调用ActionManager::GetInstance().AddAction
+
+```C
+void ActionParser::EndSection() {
+    if (action_ && action_->NumCommands() > 0) {
+        ActionManager::GetInstance().AddAction(std::move(action_));
+    }
+}
+```
+
+AddAction首先是查找是否有存在的同名Action，如果有就将他们的命令合并，没有就将它存入数组actions_中
+```C
+void ActionManager::AddAction(std::unique_ptr<Action> action) {
+    auto old_action_it =
+        std::find_if(actions_.begin(), actions_.end(),
+                     [&action] (std::unique_ptr<Action>& a) {
+                         return action->TriggersEqual(*a);
+                     });//find_if是集合中用于比较的模板，
+
+    if (old_action_it != actions_.end()) {
+        (*old_action_it)->CombineAction(*action);
+    } else {
+        actions_.emplace_back(std::move(action));
+    }
+}
+
+bool Action::TriggersEqual(const Action& other) const {
+    return property_triggers_ == other.property_triggers_ &&
+        event_trigger_ == other.event_trigger_;
+}
+
+void Action::CombineAction(const Action& action) {
+    for (const auto& c : action.commands_) {
+        commands_.emplace_back(c);
+    }
+}
+```
+
 
 ```C
     // Turning this on and letting the INFO logging be discarded adds 0.2s to
