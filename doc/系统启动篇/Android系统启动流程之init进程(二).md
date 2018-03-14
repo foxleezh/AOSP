@@ -726,7 +726,7 @@ sigaction(SIGCHLD, &act, 0) 这个是建立信号绑定关系，也就是说当�
 
 ReapAnyOutstandingChildren 这个后文讲
 
-最后，register_epoll_handler的作用就是signal_read_fd（之前的s[1]）收到信号，触发handle_signal
+最后，register_epoll_handler的作用就是注册一个行为，当signal_read_fd（之前的s[1]）收到信号，触发handle_signal
 
 终上所述，signal_handler_init函数的作用就是，接收到SIGCHLD信号时触发handle_signal
 

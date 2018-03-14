@@ -1059,14 +1059,17 @@ class core
 - EndSection用于处理Action和Service同名的情况，以及将解析的对象存入数组备用
 - EndFile只有在ImportParser中有用到，主要是解析导入的.rc文件
 
+## 三、加入一些事件和一些Action
+
+经过上一步的解析，系统已经准备就绪，是时候触发Trigger了
 ```C
     // Turning this on and letting the INFO logging be discarded adds 0.2s to
     // Nexus 9 boot time, so it's disabled by default.
-    if (false) parser.DumpState();
+    if (false) parser.DumpState(); //打印一些当前Parser的信息，默认是不执行的
 
     ActionManager& am = ActionManager::GetInstance();
 
-    am.QueueEventTrigger("early-init");//QueueEventTrigger用于触发Action,参数early-init指Action的标记
+    am.QueueEventTrigger("early-init");//QueueEventTrigger用于触发Action,这里触发 early-init事件
 
     // Queue an action that waits for coldboot done so we know ueventd has set up all of /dev...
     am.QueueBuiltinAction(wait_for_coldboot_done_action, "wait_for_coldboot_done");
@@ -1096,33 +1099,96 @@ class core
 
     // Run all property triggers based on current state of the properties.
     am.QueueBuiltinAction(queue_property_triggers_action, "queue_property_triggers");
+```
 
+### 3.1 QueueEventTrigger
+定义在platform/system/core/init/action.cpp
+
+它并没有去触发trigger，而是构造了一个EventTrigger对象，放到队列中存起来
+```C
+void ActionManager::QueueEventTrigger(const std::string& trigger) {
+    trigger_queue_.push(std::make_unique<EventTrigger>(trigger));
+}
+
+class EventTrigger : public Trigger {
+public:
+    explicit EventTrigger(const std::string& trigger) : trigger_(trigger) {
+    }
+    bool CheckTriggers(const Action& action) const override {
+        return action.CheckEventTrigger(trigger_);
+    }
+private:
+    const std::string trigger_;
+};
+```
+
+### 3.2 QueueBuiltinAction
+定义在platform/system/core/init/action.cpp
+
+这个函数有两个参数，第一个参数是一个函数指针，第二参数是字符串. 首先是创建一个Action对象，将第二参数作为Action触发条件，
+将第一个参数作为Action触发后的执行命令，并且又把第二个参数作为命令的参数，最后是将Action加入触发队列并加入Action列表
+```C
+void ActionManager::QueueBuiltinAction(BuiltinFunction func,
+                                       const std::string& name) {
+    auto action = std::make_unique<Action>(true);
+    std::vector<std::string> name_vector{name};
+
+    if (!action->InitSingleTrigger(name)) { //调用InitTriggers，之前讲过用于将name加入Action的trigger列表
+        return;
+    }
+
+    action->AddCommand(func, name_vector);//加入Action的command列表
+
+    trigger_queue_.push(std::make_unique<BuiltinTrigger>(action.get()));//将Action加入触发队列
+    actions_.emplace_back(std::move(action));//加入Action列表
+}
+```
+
+
+## 四、触发所有事件并不断监听新的事件
+
+之前的所有工作都是往各种数组、队列里面存入信息，并没有真正去触发，而接下来的工作就是真正去触发这些事件，以及用epoll不断监听新的事件
+
+```C
     while (true) {
         // By default, sleep until something happens.
-        int epoll_timeout_ms = -1;
+        int epoll_timeout_ms = -1; //epoll超时时间，相当于阻塞时间
 
+        / * 1.waiting_for_prop和IsWaitingForExec都是判断一个Timer为不为空，相当于一个标志位
+          * 2.waiting_for_prop负责属性设置，IsWaitingForExe负责service运行
+          * 3.当有属性设置或Service开始运行时，这两个值就不为空，直到执行完毕才置为空
+          * 4.其实这两个判断条件主要作用就是保证属性设置和service启动的完整性，也可以说是为了同步
+          */
         if (!(waiting_for_prop || ServiceManager::GetInstance().IsWaitingForExec())) {
-            am.ExecuteOneCommand();
+            am.ExecuteOneCommand(); //执行一个command
         }
         if (!(waiting_for_prop || ServiceManager::GetInstance().IsWaitingForExec())) {
-            restart_processes();
+            restart_processes(); //重启服务
 
             // If there's a process that needs restarting, wake up in time for that.
-            if (process_needs_restart_at != 0) {
+            if (process_needs_restart_at != 0) { //当有进程需要重启时，设置epoll_timeout_ms为重启等待时间
                 epoll_timeout_ms = (process_needs_restart_at - time(nullptr)) * 1000;
                 if (epoll_timeout_ms < 0) epoll_timeout_ms = 0;
             }
 
             // If there's more work to do, wake up again immediately.
-            if (am.HasMoreCommands()) epoll_timeout_ms = 0;
+            if (am.HasMoreCommands()) epoll_timeout_ms = 0; //当还有命令要执行时，将epoll_timeout_ms设置为0
         }
 
         epoll_event ev;
+        /*
+         * 1.epoll_wait与上一篇中讲的epoll_create1、epoll_ctl是一起使用的
+         * 2.epoll_create1用于创建epoll的文件描述符，epoll_ctl、epoll_wait都把它创建的fd作为第一个参数传入
+         * 3.epoll_ctl用于操作epoll，EPOLL_CTL_ADD：注册新的fd到epfd中，EPOLL_CTL_MOD：修改已经注册的fd的监听事件，EPOLL_CTL_DEL：从epfd中删除一个fd；
+         * 4.epoll_wait用于等待事件的产生，epoll_ctl调用EPOLL_CTL_ADD时会传入需要监听什么类型的事件，
+         *   比如EPOLLIN表示监听fd可读，当该fd有可读的数据时，调用epoll_wait经过epoll_timeout_ms时间就会把该事件的信息返回给&ev
+         */
         int nr = TEMP_FAILURE_RETRY(epoll_wait(epoll_fd, &ev, 1, epoll_timeout_ms));
         if (nr == -1) {
             PLOG(ERROR) << "epoll_wait failed";
         } else if (nr == 1) {
-            ((void (*)()) ev.data.ptr)();
+            ((void (*)()) ev.data.ptr)();//当有event返回时，取出ev.data.ptr（之前epoll_ctl注册时的回调函数），直接执行
+            //上一篇中在signal_handler_init和start_property_service有注册两个fd的监听，一个用于监听SIGCHLD(子进程结束信号)，一个用于监听属性设置
         }
     }
 
