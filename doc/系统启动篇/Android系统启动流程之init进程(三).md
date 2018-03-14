@@ -1154,7 +1154,8 @@ void ActionManager::QueueBuiltinAction(BuiltinFunction func,
         // By default, sleep until something happens.
         int epoll_timeout_ms = -1; //epoll超时时间，相当于阻塞时间
 
-        / * 1.waiting_for_prop和IsWaitingForExec都是判断一个Timer为不为空，相当于一个标志位
+         /*
+          * 1.waiting_for_prop和IsWaitingForExec都是判断一个Timer为不为空，相当于一个标志位
           * 2.waiting_for_prop负责属性设置，IsWaitingForExe负责service运行
           * 3.当有属性设置或Service开始运行时，这两个值就不为空，直到执行完毕才置为空
           * 4.其实这两个判断条件主要作用就是保证属性设置和service启动的完整性，也可以说是为了同步
