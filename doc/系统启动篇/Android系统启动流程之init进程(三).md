@@ -189,7 +189,7 @@ animation class 主要包含为开机动画或关机动画服务的service. 它�
 `priority <priority>`<br>
 设置进程优先级. 在-20～19之间，默认值是0,能过setpriority实现<br><br>
 `namespace <pid|mnt>`<br>
-当fork这个service时，设置新的pid和挂载空间<br><br>
+当fork这个service时，设置pid或mnt标记<br><br>
 `oom_score_adjust <value>`<br>
 设置子进程的 /proc/self/oom\_score\_adj 的值为 value,在 -1000 ～ 1000之间.<br><br>
 > ### Triggers
@@ -1197,5 +1197,149 @@ void ActionManager::QueueBuiltinAction(BuiltinFunction func,
 }
 ```
 
+### 4.1 ExecuteOneCommand
+定义在platform/system/core/init/action.cpp
+
+从名字可以看出，它只执行一个command，是的，只执行一个. 在函数一开始就从trigger_queue_队列中取出一个trigger，
+然后遍历所有action，找出满足trigger条件的action加入待执行列表current_executing_actions_中，
+接着从这个列表中取出一个action，执行它的第一个命令，并将命令所在下标自加1. 由于ExecuteOneCommand外部是一个无限循环，
+因此按照上面的逻辑一遍遍执行，将按照trigger表的顺序，依次执行满足trigger条件的action，然后依次执行action中的命令.
 
 
+```C
+void ActionManager::ExecuteOneCommand() {
+    // Loop through the trigger queue until we have an action to execute
+    while (current_executing_actions_.empty() && !trigger_queue_.empty()) {//current_executing_actions_.empty保证了一次只遍历一个trigger
+        for (const auto& action : actions_) {//遍历所有的Action
+            if (trigger_queue_.front()->CheckTriggers(*action)) {//满足当前Trigger条件的就加入队列current_executing_actions_
+                current_executing_actions_.emplace(action.get());
+            }
+        }
+        trigger_queue_.pop();//从trigger_queue_中踢除一个trigger
+    }
+
+    if (current_executing_actions_.empty()) {
+        return;
+    }
+
+    auto action = current_executing_actions_.front();//从满足trigger条件的action队列中取出一个action
+
+    if (current_command_ == 0) {
+        std::string trigger_name = action->BuildTriggersString();
+        LOG(INFO) << "processing action (" << trigger_name << ")";
+    }
+
+    action->ExecuteOneCommand(current_command_);//执行该action中的第current_command_个命令
+
+    // If this was the last command in the current action, then remove
+    // the action from the executing list.
+    // If this action was oneshot, then also remove it from actions_.
+    ++current_command_; //下标加1
+    if (current_command_ == action->NumCommands()) { //如果是最后一条命令
+        current_executing_actions_.pop();//将该action从current_executing_actions_中踢除
+        current_command_ = 0;
+        if (action->oneshot()) {//如果action只执行一次，将该action从数组actions_中踢除
+            auto eraser = [&action] (std::unique_ptr<Action>& a) {
+                return a.get() == action;
+            };
+            actions_.erase(std::remove_if(actions_.begin(), actions_.end(), eraser));
+        }
+    }
+} 
+```
+
+### 4.1 restart_processes
+定义在platform/system/core/init/init.cpp
+
+restart_processes调用的其实是ForEachServiceWithFlags函数，这个函数主要是遍历services_数组，比较它们的flags是否是SVC_RESTARTING，
+也就是当前service是否是等待重启的，如果是就执行它的RestartIfNeeded函数
+
+```C
+static void restart_processes()
+{
+    process_needs_restart_at = 0;
+    ServiceManager::GetInstance().ForEachServiceWithFlags(SVC_RESTARTING, [](Service* s) {
+        s->RestartIfNeeded(&process_needs_restart_at);
+    });
+}
+
+void ServiceManager::ForEachServiceWithFlags(unsigned matchflags,
+                                             void (*func)(Service* svc)) const {
+    for (const auto& s : services_) { //遍历所有service
+        if (s->flags() & matchflags) {//找出flags是SVC_RESTARTING的，执行func，也就是传入的RestartIfNeeded
+            func(s.get());
+        }
+    }
+}
+```
+
+### 4.2 RestartIfNeeded
+定义在platform/system/core/init/service.cpp
+
+这个函数将主要工作交给了Start，也就是具体的启动service，但是交给它之前做了一些判断，也就是5秒内只能启动一个服务，
+如果有多个服务，那么后续的服务将进入等待
+
+```C
+void Service::RestartIfNeeded(time_t* process_needs_restart_at) {
+    boot_clock::time_point now = boot_clock::now();
+    boot_clock::time_point next_start = time_started_ + 5s; //time_started_是上一个service启动的时间戳
+    if (now > next_start) { //也就是说两个服务进程启动的间隔必须大于5s
+        flags_ &= (~SVC_RESTARTING); // &= 加 ～ 相当于取消标记
+        Start();
+        return;
+    }
+
+    time_t next_start_time_t = time(nullptr) +
+        time_t(std::chrono::duration_cast<std::chrono::seconds>(next_start - now).count());
+    if (next_start_time_t < *process_needs_restart_at || *process_needs_restart_at == 0) {
+        *process_needs_restart_at = next_start_time_t;//如果两个service启动间隔小于5s，将剩余时间赋值给process_needs_restart_at
+    }
+}
+```
+
+### 4.2 Start
+定义在platform/system/core/init/service.cpp
+
+Start是具体去启动服务了，它主要是调用clone或fork创建子进程，然后调用execve执行配置的二进制文件，另外根据之前在.rc文件中的配置，去执行这些配置
+
+```C
+bool Service::Start() {
+
+    ... //清空标记，根据service的配置初始化console、SELinux策略等
+
+    LOG(INFO) << "starting service '" << name_ << "'...";
+
+    pid_t pid = -1;
+    if (namespace_flags_) {//这个标记当service定义了namespace时会赋值为CLONE_NEWPID|CLONE_NEWNS
+        pid = clone(nullptr, nullptr, namespace_flags_ | SIGCHLD, nullptr); //以clone方式在新的namespace创建子进程
+    } else {
+        pid = fork();//以fork方式创建子进程
+    }
+
+    if (pid == 0) {//表示创建子进程成功
+
+        ... //执行service配置的其他参数，比如setenv、writepid等
+
+        std::vector<char*> strs;
+        ExpandArgs(args_, &strs);//将args_解析一下，比如有${x.y}，然后赋值表strs
+        if (execve(strs[0], (char**) &strs[0], (char**) ENV) < 0) { //执行系统调用execve，也就是执行配置的二进制文件，把参数传进去
+            PLOG(ERROR) << "cannot execve('" << strs[0] << "')";
+        }
+
+        _exit(127);
+    }
+
+    if (pid < 0) { //子进程创建失败
+        PLOG(ERROR) << "failed to fork for '" << name_ << "'";
+        pid_ = 0;
+        return false;
+    }
+
+    ... //执行service其他参数如oom_score_adjust_，改变service运行状态等
+}
+```
+
+**小结**
+
+这一阶段Init进程做了许多重要的事情，比如解析.rc文件，这里配置了所有需要执行的action和需要启动的service,
+Init进程根据语法一步步去解析.rc，将这些配置转换成一个个数组、队列，然后开启无限循环去处理这些数组、队列中的command和service，并且通过epoll监听子进程结束和属性设置.
