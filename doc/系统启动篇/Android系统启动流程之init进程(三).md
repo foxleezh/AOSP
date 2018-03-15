@@ -33,7 +33,7 @@ platform/system/core/init/util.cpp
 ## 一、Android Init Language语法
 定义在platform/system/core/init/README.md
 
-.rc文件主要配置了两个东西，一个是action,一个是service,trigger和command是对action的补充，options是service的补充.
+.rc文件主要配置了两个东西，一个是action,一个是service,trigger和command是对action的补充，options是对service的补充.
 action加上trigger以及一些command,组成一个Section,service加上一些option，也组成一个Section ，.rc文件就是由一个个Section组成.
 .rc文件头部有一个import的语法，表示这些.rc也一并包含并解析,接下来我们重点讲下action和service.
 
@@ -400,9 +400,9 @@ bool Parser::ParseConfigFile(const std::string& path) {
 ### 2.2 ParseData
 ParseData 定义在 platform/system/core/init/init_parser.cpp
 
-ParseData通过调用next_token函数遍历每一个字符，以空格或""为分割将一行拆分成若干个单词，调用T_TEXT放到args数组中，
+ParseData通过调用next_token函数遍历每一个字符，以空格或""为分割将一行拆分成若干个单词，调用T_TEXT将单词放到args数组中，
 当读到回车符就调用T_NEWLINE，在section_parsers_这个map中找到对应的on service import的解析器，执行ParseSection，如果在
-map中找不到对应的key，就执行ParseLineSection，当读到0的时候，表示文件读取结束，调用T_EOF执行EndSection.
+map中找不到对应的key，就执行ParseLineSection，当读到0的时候，表示一个Section读取结束，调用T_EOF执行EndSection.
 
 ```C
 void Parser::ParseData(const std::string& filename, const std::string& data) {
@@ -478,6 +478,7 @@ void Parser::ParseData(const std::string& filename, const std::string& data) {
 ```
 
 它们都是SectionParser的子类,SectionParser有四个纯虚函数，分别是ParseSection、ParseLineSection、EndSection，EndFile.
+
 ```C
 class SectionParser {
 public:
@@ -502,7 +503,7 @@ public:
 ### 2.3 ActionParser
 定义在platform/system/core/init/action.cpp
 
-我们先看ParseSection，它先将args中下标1到结尾的数据复制到triggers数组中，实际是调用InitTriggers,将处理结果赋值给action_
+我们先看ParseSection，它先将args中下标1到结尾的数据复制到triggers数组中，然后是构建Action对象，调用InitTriggers,解析这些trigger
 ```C
 bool ActionParser::ParseSection(const std::vector<std::string>& args,
                                 std::string* err) {
@@ -513,7 +514,7 @@ bool ActionParser::ParseSection(const std::vector<std::string>& args,
     }
 
     auto action = std::make_unique<Action>(false);
-    if (!action->InitTriggers(triggers, err)) { //调用InitTriggers
+    if (!action->InitTriggers(triggers, err)) { //调用InitTriggers解析trigger
         return false;
     }
 
@@ -1064,7 +1065,7 @@ class core
 
 ## 三、加入一些事件和一些Action
 
-经过上一步的解析，系统已经准备就绪，是时候触发Trigger了
+经过上一步的解析，系统从各种.rc文件中读取了需要执行的Action和Service,但是还是需要一些额外的配置，也需要加入触发条件准备去触发
 ```C
     // Turning this on and letting the INFO logging be discarded adds 0.2s to
     // Nexus 9 boot time, so it's disabled by default.
