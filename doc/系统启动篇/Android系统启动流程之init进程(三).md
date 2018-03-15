@@ -11,6 +11,9 @@ init.rc是init进程启动的配置脚本，这个脚本是用一种叫Android I
 本文主要讲解以下内容
 
 - Android Init Language语法
+- 解析.rc文件
+- 加入一些事件和一些Action
+- 触发所有事件并不断监听新的事件
 
 本文涉及到的文件
 ```
