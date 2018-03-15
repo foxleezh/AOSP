@@ -1245,7 +1245,7 @@ void ActionManager::ExecuteOneCommand() {
             actions_.erase(std::remove_if(actions_.begin(), actions_.end(), eraser));
         }
     }
-} 
+}
 ```
 
 ### 4.1 restart_processes
@@ -1343,3 +1343,5 @@ bool Service::Start() {
 
 这一阶段Init进程做了许多重要的事情，比如解析.rc文件，这里配置了所有需要执行的action和需要启动的service,
 Init进程根据语法一步步去解析.rc，将这些配置转换成一个个数组、队列，然后开启无限循环去处理这些数组、队列中的command和service，并且通过epoll监听子进程结束和属性设置.
+
+至此，我已经将Init进程的三个阶段讲解完了，下一篇我将讲解.rc中配置的一个重要的service--zygote,它是我们app程序的鼻祖.
