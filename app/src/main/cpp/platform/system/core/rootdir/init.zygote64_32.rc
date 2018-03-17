@@ -1,0 +1,23 @@
+service zygote /system/bin/app_process64 -Xzygote /system/bin --zygote --start-system-server --socket-name=zygote
+    class main
+    priority -20
+    user root
+    group root readproc
+    socket zygote stream 660 root system
+    onrestart write /sys/android_power/request_state wake
+    onrestart write /sys/power/state on
+    onrestart restart audioserver
+    onrestart restart cameraserver
+    onrestart restart media
+    onrestart restart netd
+    onrestart restart wificond
+    writepid /dev/cpuset/foreground/tasks
+
+service zygote_secondary /system/bin/app_process32 -Xzygote /system/bin --zygote --socket-name=zygote_secondary --enable-lazy-preload
+    class main
+    priority -20
+    user root
+    group root readproc
+    socket zygote_secondary stream 660 root system
+    onrestart restart zygote
+    writepid /dev/cpuset/foreground/tasks

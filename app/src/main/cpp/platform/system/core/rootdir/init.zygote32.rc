@@ -1,0 +1,14 @@
+service zygote /system/bin/app_process -Xzygote /system/bin --zygote --start-system-server
+    class main
+    priority -20
+    user root
+    group root readproc
+    socket zygote stream 660 root system
+    onrestart write /sys/android_power/request_state wake
+    onrestart write /sys/power/state on
+    onrestart restart audioserver
+    onrestart restart cameraserver
+    onrestart restart media
+    onrestart restart netd
+    onrestart restart wificond
+    writepid /dev/cpuset/foreground/tasks
