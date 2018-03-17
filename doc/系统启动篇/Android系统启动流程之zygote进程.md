@@ -12,6 +12,9 @@
 ```
 platform/system/core/rootdir/init.zygoteXX.rc
 platform/system/core/rootdir/init.rc
+platform/frameworks/base/cmds/app_process/app_main.cpp
+platform/frameworks/base/core/jni/AndroidRuntime.cpp
+platform/libnativehelper/JniInvocation.cpp
 ```
 
 ## 一、zygote触发过程
@@ -166,6 +169,7 @@ LOCAL_MODULE_STEM_64 := app_process64
 接下来，我们分析app_main.cpp.
 
 ## zygote参数解析
+platform/frameworks/base/cmds/app_process/app_main.cpp
 
 在app_main.cpp的main函数中，主要做的事情就是参数解析. 这个函数有两种启动模式：
 - 一种是zygote模式，也就是初始化zygote进程，传递的参数有--start-system-server --socket-name=zygote，前者表示启动SystemServer，后者指定socket的名称
@@ -173,7 +177,7 @@ LOCAL_MODULE_STEM_64 := app_process64
 
 两者最终都是调用AppRuntime对象的start函数，加载ZygoteInit或RuntimeInit两个Java类，并将之前整理的参数传入进去
 
-由于本篇讲的是zygote进程启动流程，因此接下来我将讲解ZygoteInit的加载.
+由于本篇讲的是zygote进程启动流程，因此接下来我只讲解ZygoteInit的加载.
 
 ```C
 int main(int argc, char* const argv[])
@@ -346,5 +350,304 @@ int main(int argc, char* const argv[])
         app_usage();
         LOG_ALWAYS_FATAL("app_process: no class name or --zygote supplied.");
     }
+}
+```
+
+## 三、创建虚拟机
+
+这部分我将分两步讲解，一是虚拟机的创建，二是调用ZygoteInit类的main函数 
+
+### 3.1 AndroidRuntime.start
+platform/frameworks/base/core/jni/AndroidRuntime.cpp
+
+前半部分主要是初始化JNI，然后创建虚拟机，注册一些JNI函数，我将分开一个个单独讲
+
+```C
+
+void AndroidRuntime::start(const char* className, const Vector<String8>& options, bool zygote)
+{
+
+    ... //打印一些日志，获取ANDROID_ROOT环境变量
+
+    /* start the virtual machine */
+    JniInvocation jni_invocation;
+    jni_invocation.Init(NULL);//初始化JNI,加载libart.so
+    JNIEnv* env;
+    if (startVm(&mJavaVM, &env, zygote) != 0) {//创建虚拟机
+        return;
+    }
+    onVmCreated(env);//表示虚拟创建完成，但是里面是空实现
+
+    /*
+     * Register android functions.
+     */
+    if (startReg(env) < 0) {注册JNI函数
+        ALOGE("Unable to register all android natives\n");
+        return;
+    }
+    
+    ... //JNI方式调用ZygoteInit类的main函数
+}
+```
+
+### 3.2 JniInvocation.Init
+定义在platform/libnativehelper/JniInvocation.cpp
+
+Init函数主要作用是初始化JNI，具体工作是首先通过dlopen加载libart.so获得其句柄，然后调用dlsym从libart.so中找到
+JNI_GetDefaultJavaVMInitArgs、JNI_CreateJavaVM、JNI_GetCreatedJavaVMs三个函数地址，赋值给对应成员属性，
+这三个函数会在后续虚拟机创建中调用.
+
+```C
+bool JniInvocation::Init(const char* library) {
+#ifdef __ANDROID__
+  char buffer[PROP_VALUE_MAX];
+#else
+  char* buffer = NULL;
+#endif
+  library = GetLibrary(library, buffer);//默认返回 libart.so
+  // Load with RTLD_NODELETE in order to ensure that libart.so is not unmapped when it is closed.
+  // This is due to the fact that it is possible that some threads might have yet to finish
+  // exiting even after JNI_DeleteJavaVM returns, which can lead to segfaults if the library is
+  // unloaded.
+  const int kDlopenFlags = RTLD_NOW | RTLD_NODELETE;
+  /*
+   * 1.dlopen功能是以指定模式打开指定的动态链接库文件，并返回一个句柄
+   * 2.RTLD_NOW表示需要在dlopen返回前，解析出所有未定义符号，如果解析不出来，在dlopen会返回NULL
+   * 3.RTLD_NODELETE表示在dlclose()期间不卸载库，并且在以后使用dlopen()重新加载库时不初始化库中的静态变量
+   */
+  handle_ = dlopen(library, kDlopenFlags); // 获取libart.so的句柄
+  if (handle_ == NULL) { //获取失败打印错误日志并尝试再次打开libart.so
+    if (strcmp(library, kLibraryFallback) == 0) {
+      // Nothing else to try.
+      ALOGE("Failed to dlopen %s: %s", library, dlerror());
+      return false;
+    }
+    // Note that this is enough to get something like the zygote
+    // running, we can't property_set here to fix this for the future
+    // because we are root and not the system user. See
+    // RuntimeInit.commonInit for where we fix up the property to
+    // avoid future fallbacks. http://b/11463182
+    ALOGW("Falling back from %s to %s after dlopen error: %s",
+          library, kLibraryFallback, dlerror());
+    library = kLibraryFallback;
+    handle_ = dlopen(library, kDlopenFlags);
+    if (handle_ == NULL) {
+      ALOGE("Failed to dlopen %s: %s", library, dlerror());
+      return false;
+    }
+  }
+
+  /*
+   * 1.FindSymbol函数内部实际调用的是dlsym
+   * 2.dlsym作用是根据 动态链接库 操作句柄(handle)与符号(symbol)，返回符号对应的地址
+   * 3.这里实际就是从libart.so中将JNI_GetDefaultJavaVMInitArgs等对应的地址存入&JNI_GetDefaultJavaVMInitArgs_中
+   */
+  if (!FindSymbol(reinterpret_cast<void**>(&JNI_GetDefaultJavaVMInitArgs_),
+                  "JNI_GetDefaultJavaVMInitArgs")) {
+    return false;
+  }
+  if (!FindSymbol(reinterpret_cast<void**>(&JNI_CreateJavaVM_),
+                  "JNI_CreateJavaVM")) {
+    return false;
+  }
+  if (!FindSymbol(reinterpret_cast<void**>(&JNI_GetCreatedJavaVMs_),
+                  "JNI_GetCreatedJavaVMs")) {
+    return false;
+  }
+  return true;
+}
+```
+
+### 3.3 startVm
+定义在platform/frameworks/base/core/jni/AndroidRuntime.cpp
+
+这个函数特别长，但是里面做的事情很单一，其实就是从各种系统属性中读取一些参数，然后通过addOption设置到AndroidRuntime的mOptions数组中存起来，
+另外就是调用之前从libart.so中找到JNI_CreateJavaVM函数，并将这些参数传入，由于本篇主要讲zygote启动流程，因此关于虚拟机的实现就不深入探究了
+```C
+int AndroidRuntime::startVm(JavaVM** pJavaVM, JNIEnv** pEnv, bool zygote)
+{
+    JavaVMInitArgs initArgs;
+    ...
+    addOption("exit", (void*) runtime_exit);各//将参数放入mOptions数组中
+    ...
+    initArgs.version = JNI_VERSION_1_4;
+    initArgs.options = mOptions.editArray();//将mOptions赋值给initArgs
+    initArgs.nOptions = mOptions.size();
+    initArgs.ignoreUnrecognized = JNI_FALSE;
+    if (JNI_CreateJavaVM(pJavaVM, pEnv, &initArgs) < 0) {//调用libart.so的JNI_CreateJavaVM函数
+            ALOGE("JNI_CreateJavaVM failed\n");
+            return -1;
+    }
+    return 0;
+}
+
+extern "C" jint JNI_CreateJavaVM(JavaVM** p_vm, JNIEnv** p_env, void* vm_args) {
+  return JniInvocation::GetJniInvocation().JNI_CreateJavaVM(p_vm, p_env, vm_args);
+}
+
+jint JniInvocation::JNI_CreateJavaVM(JavaVM** p_vm, JNIEnv** p_env, void* vm_args) {
+  return JNI_CreateJavaVM_(p_vm, p_env, vm_args);//调用之前初始化的JNI_CreateJavaVM_
+}
+```
+
+
+### 3.4 startReg
+定义在platform/frameworks/base/core/jni/AndroidRuntime.cpp
+
+startReg首先是设置了Android创建线程的处理函数，然后创建了一个200容量的局部引用作用域，用于确保不会出现OutOfMemoryExceptio，
+最后就是调用register_jni_procs进行JNI注册
+
+```C
+int AndroidRuntime::startReg(JNIEnv* env)
+{
+    ATRACE_NAME("RegisterAndroidNatives");
+    /*
+     * This hook causes all future threads created in this process to be
+     * attached to the JavaVM.  (This needs to go away in favor of JNI
+     * Attach calls.)
+     */
+    androidSetCreateThreadFunc((android_create_thread_fn) javaCreateThreadEtc);
+    //设置Android创建线程的函数javaCreateThreadEtc，这个函数内部是通过Linux的clone来创建线程的
+
+    ALOGV("--- registering native functions ---\n");
+
+    /*
+     * Every "register" function calls one or more things that return
+     * a local reference (e.g. FindClass).  Because we haven't really
+     * started the VM yet, they're all getting stored in the base frame
+     * and never released.  Use Push/Pop to manage the storage.
+     */
+    env->PushLocalFrame(200);//创建一个200容量的局部引用作用域,这个局部引用其实就是局部变量
+
+    if (register_jni_procs(gRegJNI, NELEM(gRegJNI), env) < 0) { //注册JNI函数
+        env->PopLocalFrame(NULL);
+        return -1;
+    }
+    env->PopLocalFrame(NULL);//释放局部引用作用域
+
+    //createJavaThread("fubar", quickTest, (void*) "hello");
+
+    return 0;
+}
+```
+
+### 3.5 register_jni_procs
+定义在platform/frameworks/base/core/jni/AndroidRuntime.cpp
+
+它的处理是交给RegJNIRec的mProc,RegJNIRec是个很简单的结构体，mProc是个函数指针
+```C
+static int register_jni_procs(const RegJNIRec array[], size_t count, JNIEnv* env)
+{
+    for (size_t i = 0; i < count; i++) {
+        if (array[i].mProc(env) < 0) { //调用mProc
+#ifndef NDEBUG
+            ALOGD("----------!!! %s failed to load\n", array[i].mName);
+#endif
+            return -1;
+        }
+    }
+    return 0;
+}
+
+struct RegJNIRec {
+   int (*mProc)(JNIEnv*);
+};
+
+```
+
+我们看看register_jni_procs传入的RegJNIRec数组gRegJNI,里面就是一堆的函数指针
+```C
+static const RegJNIRec gRegJNI[] = {
+    REG_JNI(register_com_android_internal_os_RuntimeInit),
+    REG_JNI(register_com_android_internal_os_ZygoteInit),
+    REG_JNI(register_android_os_SystemClock),
+    REG_JNI(register_android_util_EventLog),
+    REG_JNI(register_android_util_Log),
+    REG_JNI(register_android_util_MemoryIntArray)
+    ...
+}
+```
+
+我们随便看一个register_com_android_internal_os_ZygoteInit,这实际上是自定义JNI函数并进行动态注册的标准写法,
+内部是调用JNI的RegisterNatives,这样注册后，Java类ZygoteInit的native方法nativeZygoteInit就会调用com_android_internal_os_ZygoteInit_nativeZygoteInit函数
+```C
+int register_com_android_internal_os_ZygoteInit(JNIEnv* env)
+{
+    const JNINativeMethod methods[] = {
+        { "nativeZygoteInit", "()V",
+            (void*) com_android_internal_os_ZygoteInit_nativeZygoteInit },
+    };
+    return jniRegisterNativeMethods(env, "com/android/internal/os/ZygoteInit",
+        methods, NELEM(methods));
+}
+```
+
+以上便是第一部分的内容，主要工作是从libart.so提取出JNI初始函数JNI_CreateJavaVM，然后读取一些系统属性作为参数调用JNI_CreateJavaVM创建虚拟机，
+在虚拟机创建完成后，动态注册一些native函数，接下来我们讲第二部分，反射调用ZygoteInit类的main函数
+
+### 3.6 反射调用ZygoteInit类的main函数
+
+虚拟机创建完成后，我们就可以用JNI反射调用Java了，其实接下来的语法用过JNI的都应该比较熟悉了，直接是CallStaticVoidMethod反射调用ZygoteInit的main函数
+
+
+```C
+void AndroidRuntime::start(const char* className, const Vector<String8>& options, bool zygote)
+{
+    /*
+     * We want to call main() with a String array with arguments in it.
+     * At present we have two arguments, the class name and an option string.
+     * Create an array to hold them.
+     */
+     
+    //接下来的这些语法大家应该比较熟悉了，都是JNI里的语法，主要作用就是调用ZygoteInit类的main函数 
+    jclass stringClass;
+    jobjectArray strArray;
+    jstring classNameStr;
+
+    stringClass = env->FindClass("java/lang/String");
+    assert(stringClass != NULL);
+    strArray = env->NewObjectArray(options.size() + 1, stringClass, NULL);
+    assert(strArray != NULL);
+    classNameStr = env->NewStringUTF(className);
+    assert(classNameStr != NULL);
+    env->SetObjectArrayElement(strArray, 0, classNameStr);
+
+    for (size_t i = 0; i < options.size(); ++i) {
+        jstring optionsStr = env->NewStringUTF(options.itemAt(i).string());
+        assert(optionsStr != NULL);
+        env->SetObjectArrayElement(strArray, i + 1, optionsStr);
+    }
+
+    /*
+     * Start VM.  This thread becomes the main thread of the VM, and will
+     * not return until the VM exits.
+     */
+    char* slashClassName = toSlashClassName(className);//将字符中的.转换为/
+    jclass startClass = env->FindClass(slashClassName);//找到class
+    if (startClass == NULL) {
+        ALOGE("JavaVM unable to locate class '%s'\n", slashClassName);
+        /* keep going */
+    } else {
+        jmethodID startMeth = env->GetStaticMethodID(startClass, "main",
+            "([Ljava/lang/String;)V");
+        if (startMeth == NULL) {
+            ALOGE("JavaVM unable to find main() in '%s'\n", className);
+            /* keep going */
+        } else {
+            env->CallStaticVoidMethod(startClass, startMeth, strArray);//调用main函数
+
+#if 0
+            if (env->ExceptionCheck())
+                threadExitUncaughtException(env);
+#endif
+        }
+    }
+    free(slashClassName);
+
+    ALOGD("Shutting down VM\n");
+    if (mJavaVM->DetachCurrentThread() != JNI_OK)//退出当前线程
+        ALOGW("Warning: unable to detach main thread\n");
+    if (mJavaVM->DestroyJavaVM() != 0) //创建一个线程，该线程会等待所有子线程结束后关闭虚拟机
+        ALOGW("Warning: VM did not shut down cleanly\n");
 }
 ```
