@@ -15,6 +15,8 @@ platform/system/core/rootdir/init.rc
 platform/frameworks/base/cmds/app_process/app_main.cpp
 platform/frameworks/base/core/jni/AndroidRuntime.cpp
 platform/libnativehelper/JniInvocation.cpp
+platform/frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
+
 ```
 
 ## 一、zygote触发过程
@@ -357,7 +359,7 @@ int main(int argc, char* const argv[])
 
 这部分我将分两步讲解，一是虚拟机的创建，二是调用ZygoteInit类的main函数 
 
-### 3.1 AndroidRuntime.start
+### 3.1 创建虚拟机、注册JNI函数
 platform/frameworks/base/core/jni/AndroidRuntime.cpp
 
 前半部分主要是初始化JNI，然后创建虚拟机，注册一些JNI函数，我将分开一个个单独讲
@@ -390,7 +392,7 @@ void AndroidRuntime::start(const char* className, const Vector<String8>& options
 }
 ```
 
-### 3.2 JniInvocation.Init
+#### 3.1.1 JniInvocation.Init
 定义在platform/libnativehelper/JniInvocation.cpp
 
 Init函数主要作用是初始化JNI，具体工作是首先通过dlopen加载libart.so获得其句柄，然后调用dlsym从libart.so中找到
@@ -458,7 +460,7 @@ bool JniInvocation::Init(const char* library) {
 }
 ```
 
-### 3.3 startVm
+#### 3.1.2 startVm
 定义在platform/frameworks/base/core/jni/AndroidRuntime.cpp
 
 这个函数特别长，但是里面做的事情很单一，其实就是从各种系统属性中读取一些参数，然后通过addOption设置到AndroidRuntime的mOptions数组中存起来，
@@ -491,7 +493,7 @@ jint JniInvocation::JNI_CreateJavaVM(JavaVM** p_vm, JNIEnv** p_env, void* vm_arg
 ```
 
 
-### 3.4 startReg
+#### 3.1.3 startReg
 定义在platform/frameworks/base/core/jni/AndroidRuntime.cpp
 
 startReg首先是设置了Android创建线程的处理函数，然后创建了一个200容量的局部引用作用域，用于确保不会出现OutOfMemoryExceptio，
@@ -531,7 +533,7 @@ int AndroidRuntime::startReg(JNIEnv* env)
 }
 ```
 
-### 3.5 register_jni_procs
+#### 3.1.4 register_jni_procs
 定义在platform/frameworks/base/core/jni/AndroidRuntime.cpp
 
 它的处理是交给RegJNIRec的mProc,RegJNIRec是个很简单的结构体，mProc是个函数指针
@@ -585,7 +587,7 @@ int register_com_android_internal_os_ZygoteInit(JNIEnv* env)
 以上便是第一部分的内容，主要工作是从libart.so提取出JNI初始函数JNI_CreateJavaVM，然后读取一些系统属性作为参数调用JNI_CreateJavaVM创建虚拟机，
 在虚拟机创建完成后，动态注册一些native函数，接下来我们讲第二部分，反射调用ZygoteInit类的main函数
 
-### 3.6 反射调用ZygoteInit类的main函数
+### 3.2 反射调用ZygoteInit类的main函数
 
 虚拟机创建完成后，我们就可以用JNI反射调用Java了，其实接下来的语法用过JNI的都应该比较熟悉了，直接是CallStaticVoidMethod反射调用ZygoteInit的main函数
 
@@ -650,4 +652,117 @@ void AndroidRuntime::start(const char* className, const Vector<String8>& options
     if (mJavaVM->DestroyJavaVM() != 0) //创建一个线程，该线程会等待所有子线程结束后关闭虚拟机
         ALOGW("Warning: VM did not shut down cleanly\n");
 }
+```
+
+## 进入Java世界
+
+虚拟机创建好之后，系统就可以运行Java代码了，终于是我们熟悉的语法，读起来相对简单些，接下来我们看ZygoteInit
+
+### main
+platform/frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
+
+```java
+ public static void main(String argv[]) {
+        ZygoteServer zygoteServer = new ZygoteServer();
+
+        // Mark zygote start. This ensures that thread creation will throw
+        // an error.
+        ZygoteHooks.startZygoteNoThreadCreation();
+
+        // Zygote goes into its own process group.
+        try {
+            Os.setpgid(0, 0);
+        } catch (ErrnoException ex) {
+            throw new RuntimeException("Failed to setpgid(0,0)", ex);
+        }
+
+        try {
+            // Report Zygote start time to tron unless it is a runtime restart
+            if (!"1".equals(SystemProperties.get("sys.boot_completed"))) {
+                MetricsLogger.histogram(null, "boot_zygote_init",
+                        (int) SystemClock.elapsedRealtime());
+            }
+
+            String bootTimeTag = Process.is64Bit() ? "Zygote64Timing" : "Zygote32Timing";
+            BootTimingsTraceLog bootTimingsTraceLog = new BootTimingsTraceLog(bootTimeTag,
+                    Trace.TRACE_TAG_DALVIK);
+            bootTimingsTraceLog.traceBegin("ZygoteInit");
+            RuntimeInit.enableDdms();
+            // Start profiling the zygote initialization.
+            SamplingProfilerIntegration.start();
+
+            boolean startSystemServer = false;
+            String socketName = "zygote";
+            String abiList = null;
+            boolean enableLazyPreload = false;
+            for (int i = 1; i < argv.length; i++) {
+                if ("start-system-server".equals(argv[i])) {
+                    startSystemServer = true;
+                } else if ("--enable-lazy-preload".equals(argv[i])) {
+                    enableLazyPreload = true;
+                } else if (argv[i].startsWith(ABI_LIST_ARG)) {
+                    abiList = argv[i].substring(ABI_LIST_ARG.length());
+                } else if (argv[i].startsWith(SOCKET_NAME_ARG)) {
+                    socketName = argv[i].substring(SOCKET_NAME_ARG.length());
+                } else {
+                    throw new RuntimeException("Unknown command line argument: " + argv[i]);
+                }
+            }
+
+            if (abiList == null) {
+                throw new RuntimeException("No ABI list supplied.");
+            }
+
+            zygoteServer.registerServerSocket(socketName);
+            // In some configurations, we avoid preloading resources and classes eagerly.
+            // In such cases, we will preload things prior to our first fork.
+            if (!enableLazyPreload) {
+                bootTimingsTraceLog.traceBegin("ZygotePreload");
+                EventLog.writeEvent(LOG_BOOT_PROGRESS_PRELOAD_START,
+                    SystemClock.uptimeMillis());
+                preload(bootTimingsTraceLog);
+                EventLog.writeEvent(LOG_BOOT_PROGRESS_PRELOAD_END,
+                    SystemClock.uptimeMillis());
+                bootTimingsTraceLog.traceEnd(); // ZygotePreload
+            } else {
+                Zygote.resetNicePriority();
+            }
+
+            // Finish profiling the zygote initialization.
+            SamplingProfilerIntegration.writeZygoteSnapshot();
+
+            // Do an initial gc to clean up after startup
+            bootTimingsTraceLog.traceBegin("PostZygoteInitGC");
+            gcAndFinalize();
+            bootTimingsTraceLog.traceEnd(); // PostZygoteInitGC
+
+            bootTimingsTraceLog.traceEnd(); // ZygoteInit
+            // Disable tracing so that forked processes do not inherit stale tracing tags from
+            // Zygote.
+            Trace.setTracingEnabled(false);
+
+            // Zygote process unmounts root storage spaces.
+            Zygote.nativeUnmountStorageOnInit();
+
+            // Set seccomp policy
+            Seccomp.setPolicy();
+
+            ZygoteHooks.stopZygoteNoThreadCreation();
+
+            if (startSystemServer) {
+                startSystemServer(abiList, socketName, zygoteServer);
+            }
+
+            Log.i(TAG, "Accepting command socket connections");
+            zygoteServer.runSelectLoop(abiList);
+
+            zygoteServer.closeServerSocket();
+        } catch (Zygote.MethodAndArgsCaller caller) {
+            caller.run();
+        } catch (Throwable ex) {
+            Log.e(TAG, "System zygote died with exception", ex);
+            zygoteServer.closeServerSocket();
+            throw ex;
+        }
+    }
 ```
