@@ -16,7 +16,10 @@ platform/frameworks/base/cmds/app_process/app_main.cpp
 platform/frameworks/base/core/jni/AndroidRuntime.cpp
 platform/libnativehelper/JniInvocation.cpp
 platform/frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
-
+platform/libcore/dalvik/src/main/java/dalvik/system/ZygoteHooks
+platform/art/runtime/native/dalvik_system_ZygoteHooks.cc
+platform/art/runtime/runtime.h
+platform/art/runtime/runtime.cc
 ```
 
 ## 一、zygote触发过程
@@ -667,7 +670,7 @@ platform/frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
 
         // Mark zygote start. This ensures that thread creation will throw
         // an error.
-        ZygoteHooks.startZygoteNoThreadCreation();
+        ZygoteHooks.startZygoteNoThreadCreation(); //设置标记，不允许新建线程
 
         // Zygote goes into its own process group.
         try {
