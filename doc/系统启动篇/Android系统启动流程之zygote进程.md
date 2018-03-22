@@ -173,7 +173,7 @@ LOCAL_MODULE_STEM_64 := app_process64
 
 接下来，我们分析app_main.cpp.
 
-## zygote参数解析
+## 二、zygote参数解析
 platform/frameworks/base/cmds/app_process/app_main.cpp
 
 在app_main.cpp的main函数中，主要做的事情就是参数解析. 这个函数有两种启动模式：
@@ -657,9 +657,10 @@ void AndroidRuntime::start(const char* className, const Vector<String8>& options
 }
 ```
 
-## 进入Java世界
+## 四、进入Java世界
 
-虚拟机创建好之后，系统就可以运行Java代码了，终于是我们熟悉的语法，读起来相对简单些，接下来我们看ZygoteInit
+虚拟机创建好之后，系统就可以运行Java代码了，终于是我们熟悉的语法，读起来相对简单些，但是Java代码经常要用JNI调用native代码，
+如果我们要了解native的具体实现，我们就必须找到对应的JNI注册函数，说实话还挺不好找的，有些我都是全局搜索才找到的，我具体讲代码的时候再说如何去找native代码实现。
 
 ### main
 platform/frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
