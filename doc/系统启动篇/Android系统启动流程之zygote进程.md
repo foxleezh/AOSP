@@ -666,7 +666,7 @@ void AndroidRuntime::start(const char* className, const Vector<String8>& options
 platform/frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
 
 ```java
- public static void main(String argv[]) {
+public static void main(String argv[]) {
         ZygoteServer zygoteServer = new ZygoteServer();
 
         // Mark zygote start. This ensures that thread creation will throw
@@ -694,6 +694,16 @@ platform/frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
             RuntimeInit.enableDdms();
             // Start profiling the zygote initialization.
             SamplingProfilerIntegration.start();
+            ...
+
+}
+
+```
+
+```java
+public static void main(String argv[]) {
+
+            ...
 
             boolean startSystemServer = false;
             String socketName = "zygote";
@@ -716,8 +726,16 @@ platform/frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
             if (abiList == null) {
                 throw new RuntimeException("No ABI list supplied.");
             }
-
             zygoteServer.registerServerSocket(socketName);
+            ...
+}
+```
+
+```java
+ public static void main(String argv[]) {
+
+            ...
+
             // In some configurations, we avoid preloading resources and classes eagerly.
             // In such cases, we will preload things prior to our first fork.
             if (!enableLazyPreload) {
@@ -744,6 +762,17 @@ platform/frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
             // Disable tracing so that forked processes do not inherit stale tracing tags from
             // Zygote.
             Trace.setTracingEnabled(false);
+
+            ...
+
+}
+```
+
+
+```java
+ public static void main(String argv[]) {
+
+            ...
 
             // Zygote process unmounts root storage spaces.
             Zygote.nativeUnmountStorageOnInit();
