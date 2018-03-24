@@ -661,9 +661,18 @@ void AndroidRuntime::start(const char* className, const Vector<String8>& options
 
 虚拟机创建好之后，系统就可以运行Java代码了，终于是我们熟悉的语法，读起来相对简单些，但是Java代码经常要用JNI调用native代码，
 如果我们要了解native的具体实现，我们就必须找到对应的JNI注册函数，说实话还挺不好找的，有些我都是全局搜索才找到的，我具体讲代码的时候再说如何去找native代码实现。
+接下来我将分析ZygoteInit的main函数，我将拆分为四个部分来讲：
+- 开启性能统计
+- 注册Socket
+- 加载资源
+- 开启守护循环
 
-### main
-platform/frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
+### 4.1 开启性能统计
+定义在platform/frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
+
+main函数最开始new了一个ZygoteServer，这个后续会用到，然后设置标记，不允许新建线程，为什么不允许多线程呢？
+这主要是担心用户创建app时，多线程情况下某些预先加载的资源没加载好，这时去调用会出问题. 接着设置了zygote进程的进程组id，
+
 
 ```java
 public static void main(String argv[]) {
