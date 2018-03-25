@@ -672,6 +672,7 @@ void AndroidRuntime::start(const char* className, const Vector<String8>& options
 
 main函数最开始new了一个ZygoteServer，这个后续会用到，然后设置标记，不允许新建线程，为什么不允许多线程呢？
 这主要是担心用户创建app时，多线程情况下某些预先加载的资源没加载好，这时去调用会出问题. 接着设置了zygote进程的进程组id，
+最后便是一系列性能统计相关的动作
 
 
 ```java
@@ -702,11 +703,55 @@ public static void main(String argv[]) {
             bootTimingsTraceLog.traceBegin("ZygoteInit"); //跟踪调试ZygoteInit
             RuntimeInit.enableDdms(); //开启DDMS
             // Start profiling the zygote initialization.
-            SamplingProfilerIntegration.start();
+            SamplingProfilerIntegration.start(); //开始性能统计
             ...
+            SamplingProfilerIntegration.writeZygoteSnapshot();//结束性能统计并写入文件
 
 }
 
+```
+
+#### 4.1.1 startZygoteNoThreadCreation
+定义在platform/libcore/dalvik/src/main/java/dalvik/system/ZygoteHooks中
+
+这是一个native方法，其实这个方法作用并不复杂，只是设置一个boolean值而已，我特意在这儿讲是想告诉大家如何去追踪native方法的实现.
+我们知道native方法有两种注册方式，一种是静态注册，一种动态注册。所谓静态注册就是根据函数名称和一些关键字就可以注册，比如startZygoteNoThreadCreation
+要静态注册的话，它对应的实现函数应该是
+```c
+JNIEXPORT void JNICALL Java_dalvik_system_ZygoteHooks_startZygoteNoThreadCreation(JNIEnv *, jobject){
+}
+
+```
+也就是说首先得有JNIEXPORT，JNICALL这些关键字，其实函数名称必须以Java开头，后面接的是native函数所在类的完整路径加native函数名，
+最后参数及返回值要相同，参数会多出两个，一个是JNIEnv，表示JNI上下文，一个是jobject，表示调用native函数的对象. 只要你按照这个规则写，
+Java的native函数就会自动调用这个C++层的函数。这种静态的注册方式有个不好的地方就是函数名太长，书写不方便，而且在首次调用时会有一个注册过程，
+影响效率，那有没有其他方式呢？答案就是动态注册
+
+其实大多数frameworks层的native函数都是用动态方式注册的，startZygoteNoThreadCreation函数也是，我们就以startZygoteNoThreadCreation为例.
+
+```java
+
+    /*
+     * Called by the zygote when starting up. It marks the point when any thread
+     * start should be an error, as only internal daemon threads are allowed there.
+     */
+    public static native void startZygoteNoThreadCreation(); 
+```
+
+我们怎么寻找startZygoteNoThreadCreation的实现呢？这里有个规律，Google工程师喜欢以native所在类的完整路径为C++的实现类名，比如
+startZygoteNoThreadCreation所在类的完整路径是dalvik.system.ZygoteHooks，我们尝试寻找dalvik_system_ZygoteHooks这个文件，
+果然出现了dalvik_system_ZygoteHooks.h和dalvik_system_ZygoteHooks.cc，我们看下dalvik_system_ZygoteHooks.cc
+```C
+static JNINativeMethod gMethods[] = {
+  NATIVE_METHOD(ZygoteHooks, nativePreFork, "()J"),
+  NATIVE_METHOD(ZygoteHooks, nativePostForkChild, "(JIZLjava/lang/String;)V"),
+  NATIVE_METHOD(ZygoteHooks, startZygoteNoThreadCreation, "()V"),
+  NATIVE_METHOD(ZygoteHooks, stopZygoteNoThreadCreation, "()V"),
+};
+
+void register_dalvik_system_ZygoteHooks(JNIEnv* env) {
+  REGISTER_NATIVE_METHODS("dalvik/system/ZygoteHooks");
+}
 ```
 
 ```java
