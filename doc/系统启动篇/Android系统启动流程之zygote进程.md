@@ -19,7 +19,7 @@ platform/frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
 platform/libcore/dalvik/src/main/java/dalvik/system/ZygoteHooks
 platform/art/runtime/native/dalvik_system_ZygoteHooks.cc
 platform/art/runtime/runtime.h
-platform/art/runtime/runtime.cc
+platform/libnativehelper/JNIHelp.cpp
 ```
 
 ## 一、zygote触发过程
@@ -714,6 +714,15 @@ public static void main(String argv[]) {
 #### 4.1.1 startZygoteNoThreadCreation
 定义在platform/libcore/dalvik/src/main/java/dalvik/system/ZygoteHooks中
 
+```java
+
+    /*
+     * Called by the zygote when starting up. It marks the point when any thread
+     * start should be an error, as only internal daemon threads are allowed there.
+     */
+    public static native void startZygoteNoThreadCreation();
+```
+
 这是一个native方法，其实这个方法作用并不复杂，只是设置一个boolean值而已，我特意在这儿讲是想告诉大家如何去追踪native方法的实现.
 我们知道native方法有两种注册方式，一种是静态注册，一种动态注册。所谓静态注册就是根据函数名称和一些关键字就可以注册，比如startZygoteNoThreadCreation
 要静态注册的话，它对应的实现函数应该是
@@ -729,14 +738,7 @@ Java的native函数就会自动调用这个C++层的函数。这种静态的注�
 
 其实大多数frameworks层的native函数都是用动态方式注册的，startZygoteNoThreadCreation函数也是，我们就以startZygoteNoThreadCreation为例.
 
-```java
 
-    /*
-     * Called by the zygote when starting up. It marks the point when any thread
-     * start should be an error, as only internal daemon threads are allowed there.
-     */
-    public static native void startZygoteNoThreadCreation(); 
-```
 
 我们怎么寻找startZygoteNoThreadCreation的实现呢？这里有个规律，Google工程师喜欢以native所在类的完整路径为C++的实现类名，比如
 startZygoteNoThreadCreation所在类的完整路径是dalvik.system.ZygoteHooks，我们尝试寻找dalvik_system_ZygoteHooks这个文件，
@@ -753,6 +755,117 @@ void register_dalvik_system_ZygoteHooks(JNIEnv* env) {
   REGISTER_NATIVE_METHODS("dalvik/system/ZygoteHooks");
 }
 ```
+好像有点苗头了，gMethods数组中有我们要的startZygoteNoThreadCreation，这个数组的类型是JNINativeMethod，但是数组中却是
+NATIVE_METHOD，我们看看这个NATIVE_METHOD是什么
+```C
+#define NATIVE_METHOD(className, functionName, signature) \
+{ #functionName, signature, (void*)(className ## _ ## functionName) }
+```
+如何理解这个定义呢？#define是宏定义，也就是说编译期间要做宏替换，这里就是把NATIVE_METHOD替换成
+{"","",(void*)()},具体怎么替换呢？我们看到{}里有些#、##，#表示字符串化，##表示字符串化拼接，相当于Java中的
+String.format,以NATIVE_METHOD(ZygoteHooks, startZygoteNoThreadCreation, "()V")为例，替换后就是
+{"startZygoteNoThreadCreation","()V",(void*)(ZygoteHooks_startZygoteNoThreadCreation) }
+
+我们再回顾下 JNINativeMethod ，它是一个结构体,name表示native函数名，signature表示用字符串描述native函数的参数和返回值,
+fnPtr表示native指向的C++函数指针,这其实就是动态注册的映射关系了，将native函数对应一个C++函数
+```C
+typedef struct {
+const char* name;
+const char* signature;
+void* fnPtr;
+} JNINativeMethod;
+```
+
+JNINativeMethod只是个结构体，真正注册的函数是在 REGISTER_NATIVE_METHODS("dalvik/system/ZygoteHooks")，我们先看看
+REGISTER_NATIVE_METHODS
+```c
+#define REGISTER_NATIVE_METHODS(jni_class_name) \
+  RegisterNativeMethods(env, jni_class_name, gMethods, arraysize(gMethods))
+```
+它也是一个宏定义，指向的是RegisterNativeMethods，这个函数定义在platform/frameworks/base/core/jni/AndroidRuntime.cpp
+```C
+/*
+ * Register native methods using JNI.
+ */
+/*static*/ int AndroidRuntime::registerNativeMethods(JNIEnv* env,
+    const char* className, const JNINativeMethod* gMethods, int numMethods)
+{
+    return jniRegisterNativeMethods(env, className, gMethods, numMethods);
+}
+```
+其实它调用的是jniRegisterNativeMethods，这个定义在platform/libnativehelper/JNIHelp.cpp，
+jniRegisterNativeMethods函数首先是将传过来的类名字符串找到对应的class，然后就是调用(*env)->RegisterNatives动态注册JNI，
+其实调用这么多层，动态注册最关键的就是构建一个结构体JNINativeMethod，然后调用(*env)->RegisterNatives，RegisterNatives属于
+虚拟机内的函数了，今后讲虚拟机时我再具体去分析，这里我们知道它的作用就行了.
+```C
+extern "C" int jniRegisterNativeMethods(C_JNIEnv* env, const char* className,
+    const JNINativeMethod* gMethods, int numMethods)
+{
+    JNIEnv* e = reinterpret_cast<JNIEnv*>(env);
+
+    ALOGV("Registering %s's %d native methods...", className, numMethods);
+
+    scoped_local_ref<jclass> c(env, findClass(env, className)); //根据类名找到class
+    if (c.get() == NULL) {
+        char* tmp;
+        const char* msg;
+        if (asprintf(&tmp,
+                     "Native registration unable to find class '%s'; aborting...",
+                     className) == -1) {
+            // Allocation failed, print default warning.
+            msg = "Native registration unable to find class; aborting...";
+        } else {
+            msg = tmp;
+        }
+        e->FatalError(msg);
+    }
+
+    if ((*env)->RegisterNatives(e, c.get(), gMethods, numMethods) < 0) { //动态注册jni
+        char* tmp;
+        const char* msg;
+        if (asprintf(&tmp, "RegisterNatives failed for '%s'; aborting...", className) == -1) {
+            // Allocation failed, print default warning.
+            msg = "RegisterNatives failed; aborting...";
+        } else {
+            msg = tmp;
+        }
+        e->FatalError(msg);
+    }
+
+    return 0;
+}
+```
+
+我们接着上面的startZygoteNoThreadCreation函数讲，由上可知这个native函数实际会调用ZygoteHooks_startZygoteNoThreadCreation,
+它定义在platform/art/runtime/native/dalvik_system_ZygoteHooks.cc
+```C
+static void ZygoteHooks_startZygoteNoThreadCreation(JNIEnv* env ATTRIBUTE_UNUSED,
+                                                    jclass klass ATTRIBUTE_UNUSED) {
+  Runtime::Current()->SetZygoteNoThreadSection(true);
+}
+```
+其实它又是调用Runtime的SetZygoteNoThreadSection函数，这个定义在platform/art/runtime/runtime.h,这个函数的实现非常简单，
+就是将zygote_no_threads_这个bool值设置为想要的值
+```C
+static Runtime* instance_;
+
+// Whether zygote code is in a section that should not start threads.
+bool zygote_no_threads_;
+
+static Runtime* Current() {
+   return instance_;
+}
+
+void SetZygoteNoThreadSection(bool val) {
+   zygote_no_threads_ = val;
+}
+
+```
+
+由此我们可以看到startZygoteNoThreadCreation这个native函数经过层层调用，最终就是将一个bool变量设置为true. 讲得是有点多了，
+这里主要是告诉大家如何去追踪native函数的实现，因为这是阅读frameworks层代码必备的技能. 这里我还是再次推荐大家用Source Insight
+来看代码，不管是函数跳转还是全局搜索都是非常方便的，详情请看我之前写的「如何阅读Android源码.md」
+
 
 ```java
 public static void main(String argv[]) {
