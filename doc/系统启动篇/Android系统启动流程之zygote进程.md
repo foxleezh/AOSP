@@ -684,7 +684,7 @@ public static void main(String argv[]) {
 
         // Zygote goes into its own process group.
         try {
-            Os.setpgid(0, 0);
+            Os.setpgid(0, 0); //设置zygote进程组id为zygote的pid
         } catch (ErrnoException ex) {
             throw new RuntimeException("Failed to setpgid(0,0)", ex);
         }
@@ -693,14 +693,14 @@ public static void main(String argv[]) {
             // Report Zygote start time to tron unless it is a runtime restart
             if (!"1".equals(SystemProperties.get("sys.boot_completed"))) {
                 MetricsLogger.histogram(null, "boot_zygote_init",
-                        (int) SystemClock.elapsedRealtime());
+                        (int) SystemClock.elapsedRealtime());//记录boot_zygote_init时间戳
             }
 
             String bootTimeTag = Process.is64Bit() ? "Zygote64Timing" : "Zygote32Timing";
             BootTimingsTraceLog bootTimingsTraceLog = new BootTimingsTraceLog(bootTimeTag,
                     Trace.TRACE_TAG_DALVIK);
-            bootTimingsTraceLog.traceBegin("ZygoteInit");
-            RuntimeInit.enableDdms();
+            bootTimingsTraceLog.traceBegin("ZygoteInit"); //跟踪调试ZygoteInit
+            RuntimeInit.enableDdms(); //开启DDMS
             // Start profiling the zygote initialization.
             SamplingProfilerIntegration.start();
             ...
