@@ -8,6 +8,7 @@ Client和Server要通信，那就得用接口。JNI主要包括两个方面的�
 
 本文涉及到的文件
 ```
+platform/libnativehelper/include/nativehelper/jni.h
 platform/frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
 platform/libcore/dalvik/src/main/java/dalvik/system/ZygoteHooks
 platform/art/runtime/native/dalvik_system_ZygoteHooks.cc
@@ -98,8 +99,8 @@ void AndroidRuntime::start(const char* className, const Vector<String8>& options
 |short	|jshort	|
 |int	|jint	|
 |long	|jlong	|
-|float	|jfloat|
-|double	|jdouble	|
+|float	|jfloat |
+|double	|jdouble|
 |void	|void	|
 
 引用数据类型
@@ -122,10 +123,51 @@ void AndroidRuntime::start(const char* className, const Vector<String8>& options
     jstring classNameStr;
 ```
 
+### 1.2 env->FindClass
+
 我们再接着往下看，env->FindClass, env是虚拟机的环境，可以类比为Android中无处不在的Context,
 但是这个env是指特定线程的环境，也就是说一个线程对应一个env.
 env有许多的函数，FindClass只是其中一个，作用就是根据ClassName找到对应的class，
-其实这跟Java中反射获取Class有点像
+用法是不是跟Java中反射获取Class有点像,其实Java反射也是native方法，而在实现上也是跟env->FindClass一样，
+不信？I show you the code!
+
+我们先看看env->FindClass的实现,定义在platform/libnativehelper/include/nativehelper/jni.h中，
+env的类型是JNIEnv ,这个JNIEnv 在C环境和C++环境类型不一样，在C环境中定义的是JNINativeInterface* ，
+而C++中定义的是_JNIEnv，_JNIEnv其实内部也是调用JNINativeInterface的对应函数，只是做了层代理,
+JNINativeInterface是个结构体，里面就有我们要找的函数FindClass
+
+```C
+#if defined(__cplusplus) //如果是C++
+typedef _JNIEnv JNIEnv;
+typedef _JavaVM JavaVM;
+#else //如果是C
+typedef const struct JNINativeInterface* JNIEnv;
+typedef const struct JNIInvokeInterface* JavaVM;
+#endif 
+
+
+struct _JNIEnv {
+    const struct JNINativeInterface* functions;
+    ...
+    jclass FindClass(const char* name)
+    { return functions->FindClass(this, name); } 
+    ...
+}
+
+
+struct JNINativeInterface { 
+    ...
+    jclass      (*FindClass)(JNIEnv*, const char*);
+    ...
+}
+
+```
+
+那这个结构体JNINativeInterface中FindClass的函数指针什么时候赋值的呢？还记得上文中有个创建虚拟机的函数JNI_CreateJavaVM,
+里面有个参数就是JNIEnv,其实也就是在创建虚拟机的时候把函数指针赋值的，我们知道JNI_CreateJavaVM是加载libart.so时获取的，
+那我们就得找libart.so的源码，
+
+
 ```C
     stringClass = env->FindClass("java/lang/String");
 
@@ -372,12 +414,12 @@ public final class Libcore {
      */
     public static Os os = new BlockGuardOs(rawOs);
 }
- 
+ 
 ```
 我们再来看看Linux.java的实现是怎样的
 ```java
 public final class Linux implements Os {
-    Linux() { } 
+    Linux() { } 
 
     ...
     public native void setpgid(int pid, int pgid) throws ErrnoException;
@@ -511,3 +553,4 @@ public static void main(String argv[]) {
         }
     }
 ```
+
