@@ -9,6 +9,8 @@ Client和Server要通信，那就得用接口。JNI主要包括两个方面的�
 本文涉及到的文件
 ```
 platform/libnativehelper/include/nativehelper/jni.h
+platform/art/runtime/java_vm_ext.cc
+platform/art/runtime/jni_internal.cc
 platform/frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
 platform/libcore/dalvik/src/main/java/dalvik/system/ZygoteHooks
 platform/art/runtime/native/dalvik_system_ZygoteHooks.cc
@@ -165,13 +167,54 @@ struct JNINativeInterface {
 
 那这个结构体JNINativeInterface中FindClass的函数指针什么时候赋值的呢？还记得上文中有个创建虚拟机的函数JNI_CreateJavaVM,
 里面有个参数就是JNIEnv,其实也就是在创建虚拟机的时候把函数指针赋值的，我们知道JNI_CreateJavaVM是加载libart.so时获取的，
-那我们就得找libart.so的源码，
-
+那我们就得找libart.so的源码，这个对应的源码在platform/art/runtime/java_vm_ext.cc,它会调用Runtime::Create函数去新建
+线程，在线程新建的过程中会对JNIEnv进行赋值，然后函数最后去调用线程的GetJniEnv得到JNIEnv的实例，篇幅有限就不深入讲虚拟机了
 
 ```C
-    stringClass = env->FindClass("java/lang/String");
+extern "C" jint JNI_CreateJavaVM(JavaVM** p_vm, JNIEnv** p_env, void* vm_args) {
+  ...
 
+  if (!Runtime::Create(options, ignore_unrecognized)) {
+    return JNI_ERR;
+  }
+
+  *p_env = Thread::Current()->GetJniEnv();
+}
 ```
+
+这个GetJniEnv返回的是一个JNINativeInterface的实例,定义在/platform/art/runtime/jni_internal.cc，其中就有我们要找的FindClass
+
+```C
+const JNINativeInterface gJniNativeInterface = {
+  nullptr,  // reserved0.
+  nullptr,  // reserved1.
+  nullptr,  // reserved2.
+  nullptr,  // reserved3.
+  JNI::GetVersion,
+  JNI::DefineClass,
+  JNI::FindClass,
+}
+```
+这个FindClass对应的是JNI::FindClass，定义在当前文件中,内部是通过ClassLoader的FindClass实现的
+```C
+  static jclass FindClass(JNIEnv* env, const char* name) {
+    CHECK_NON_NULL_ARGUMENT(name);
+    Runtime* runtime = Runtime::Current();
+    ClassLinker* class_linker = runtime->GetClassLinker(); //获取ClassLoader
+    std::string descriptor(NormalizeJniClassDescriptor(name));
+    ScopedObjectAccess soa(env);
+    mirror::Class* c = nullptr;
+    if (runtime->IsStarted()) {
+      StackHandleScope<1> hs(soa.Self());
+      Handle<mirror::ClassLoader> class_loader(hs.NewHandle(GetClassLoader(soa)));
+      c = class_linker->FindClass(soa.Self(), descriptor.c_str(), class_loader); //查找类
+    } else {
+      c = class_linker->FindSystemClass(soa.Self(), descriptor.c_str()); //查找系统类
+    }
+    return soa.AddLocalReference<jclass>(c);
+  }
+```
+
 
 
 ## 二、Java调用C++
