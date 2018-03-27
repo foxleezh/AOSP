@@ -1,10 +1,10 @@
 ## 前言
 前文讲到虚拟机创建后反射调用了ZygoteInit的main方法，说到虚拟机，我们就不得不说下JNI，它是沟通Java和C++的桥梁。
+JNI全称是Java Native Interface,可以把它理解为一种接口编程方式，就像我们平常开发的C/S模式一样，
+Client和Server要通信，那就得用接口。JNI主要包括两个方面的内容：
 
-
-本文主要讲解以下内容
-
-- 进入Java世界
+- C++调用Java
+- Java调用C++
 
 本文涉及到的文件
 ```
@@ -21,8 +21,118 @@ platform/libcore/luni/src/main/java/libcore/io/Linux.java
 platform/libcore/luni/src/main/native/libcore_io_Linux.cpp
 ```
 
+## 一、C++调用Java
 
-## 一、进入Java世界
+为什么我先讲C++调用Java呢？因为前文创建了虚拟机后，首先是从C++调用了Java，所以我接着前文的例子来讲,
+我们回顾一下之前C++调用ZygoteInit的main函数的过程,我将分段一步步为大家解释。
+
+```C
+void AndroidRuntime::start(const char* className, const Vector<String8>& options, bool zygote)
+{
+    /*
+     * We want to call main() with a String array with arguments in it.
+     * At present we have two arguments, the class name and an option string.
+     * Create an array to hold them.
+     */
+    jclass stringClass;
+    jobjectArray strArray;
+    jstring classNameStr;
+
+    stringClass = env->FindClass("java/lang/String");
+    assert(stringClass != NULL);
+    strArray = env->NewObjectArray(options.size() + 1, stringClass, NULL);
+    assert(strArray != NULL);
+    classNameStr = env->NewStringUTF(className);
+    assert(classNameStr != NULL);
+    env->SetObjectArrayElement(strArray, 0, classNameStr);
+
+    for (size_t i = 0; i < options.size(); ++i) {
+        jstring optionsStr = env->NewStringUTF(options.itemAt(i).string());
+        assert(optionsStr != NULL);
+        env->SetObjectArrayElement(strArray, i + 1, optionsStr);
+    }
+
+    /*
+     * Start VM.  This thread becomes the main thread of the VM, and will
+     * not return until the VM exits.
+     */
+    char* slashClassName = toSlashClassName(className);//将字符中的.转换为/
+    jclass startClass = env->FindClass(slashClassName);//找到class
+    if (startClass == NULL) {
+        ALOGE("JavaVM unable to locate class '%s'\n", slashClassName);
+        /* keep going */
+    } else {
+        jmethodID startMeth = env->GetStaticMethodID(startClass, "main",
+            "([Ljava/lang/String;)V");
+        if (startMeth == NULL) {
+            ALOGE("JavaVM unable to find main() in '%s'\n", className);
+            /* keep going */
+        } else {
+            env->CallStaticVoidMethod(startClass, startMeth, strArray);//调用main函数
+
+#if 0
+            if (env->ExceptionCheck())
+                threadExitUncaughtException(env);
+#endif
+        }
+    }
+    free(slashClassName);
+
+    ...
+
+}
+```
+
+### 1.1 Java中各类型在C++的对应关系
+
+比如说我们Java中有常见的Class，String,int,short等，这些在C++中并不是叫原来的名字，而是另外取了个名字，
+基本就是在原来的名字前加了个j，表示java. 下面是他们的对应关系
+
+基本数据类型和void
+
+|Java类型|C++类型|
+| :-- | :-- |
+|boolean|	jboolean|
+|byte	|jbyte	|
+|char	|jchar	|
+|short	|jshort	|
+|int	|jint	|
+|long	|jlong	|
+|float	|jfloat|
+|double	|jdouble	|
+|void	|void	|
+
+引用数据类型
+
+|Java类型|C++类型|
+| :-- | :-- |
+|All objects|	jobject|
+|java.lang.Class实例	|jclass	|
+|java.lang.String实例|jstring	|
+|java.lang.Throwable实例	|jthrowable	|
+|Object[]（包含Class,String,Throwable）| jobjectArray	|
+|boolean[]	|jbooleanArray	|
+|byte[]（其他基本数据类型类似）|jbyteArray|
+
+
+那其实下面的代码就好理解了,就相当于定义了三个局部变量，类型为Class,String[],String
+```C
+    jclass stringClass;
+    jobjectArray strArray;
+    jstring classNameStr;
+```
+
+我们再接着往下看，env->FindClass, env是虚拟机的环境，可以类比为Android中无处不在的Context,
+但是这个env是指特定线程的环境，也就是说一个线程对应一个env.
+env有许多的函数，FindClass只是其中一个，作用就是根据ClassName找到对应的class，
+其实这跟Java中反射获取Class有点像
+```C
+    stringClass = env->FindClass("java/lang/String");
+
+```
+
+
+## 二、Java调用C++
 
 虚拟机创建好之后，系统就可以运行Java代码了，终于是我们熟悉的语法，读起来相对简单些，但是Java代码经常要用JNI调用native代码，
 如果我们要了解native的具体实现，我们就必须找到对应的JNI注册函数，说实话还挺不好找的，有些我都是全局搜索才找到的，我具体讲代码的时候再说如何去找native代码实现。
