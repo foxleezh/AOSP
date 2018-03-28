@@ -128,13 +128,13 @@ void AndroidRuntime::start(const char* className, const Vector<String8>& options
 ### 1.2 env->FindClass
 
 我们再接着往下看，env->FindClass, env是虚拟机的环境，可以类比为Android中无处不在的Context,
-但是这个env是指特定线程的环境，也就是说一个线程对应一个env.
-env有许多的函数，FindClass只是其中一个，作用就是根据ClassName找到对应的class，
-用法是不是跟Java中反射获取Class有点像,其实Java反射也是native方法，而在实现上也是跟env->FindClass一样，
-不信？I show you the code!
+但是这个env是指特定线程的环境，也就是说一个线程对应一个env. <br>
 
-我们先看看env->FindClass的实现,定义在platform/libnativehelper/include/nativehelper/jni.h中，
-env的类型是JNIEnv ,这个JNIEnv 在C环境和C++环境类型不一样，在C环境中定义的是JNINativeInterface* ，
+env有许多的函数，FindClass只是其中一个，作用就是根据ClassName找到对应的class，
+用法是不是跟Java中反射获取Class有点像,其实Java反射也是native方法，而在实现上也是跟env->FindClass一样.
+
+我们来具体看看env->FindClass的实现,env的类型是JNIEnv,定义在platform/libnativehelper/include/nativehelper/jni.h中,
+这个JNIEnv 在C环境和C++环境类型不一样，在C环境中定义的是JNINativeInterface* ，
 而C++中定义的是_JNIEnv，_JNIEnv其实内部也是调用JNINativeInterface的对应函数，只是做了层代理,
 JNINativeInterface是个结构体，里面就有我们要找的函数FindClass
 
@@ -168,7 +168,11 @@ struct JNINativeInterface {
 那这个结构体JNINativeInterface中FindClass的函数指针什么时候赋值的呢？还记得上文中有个创建虚拟机的函数JNI_CreateJavaVM,
 里面有个参数就是JNIEnv,其实也就是在创建虚拟机的时候把函数指针赋值的，我们知道JNI_CreateJavaVM是加载libart.so时获取的，
 那我们就得找libart.so的源码，这个对应的源码在platform/art/runtime/java_vm_ext.cc,它会调用Runtime::Create函数去新建
-线程，在线程新建的过程中会对JNIEnv进行赋值，然后函数最后去调用线程的GetJniEnv得到JNIEnv的实例，篇幅有限就不深入讲虚拟机了
+线程，在线程新建的过程中会对JNIEnv进行赋值，JNI_CreateJavaVM函数最后会去调用线程的GetJniEnv得到JNIEnv的实例，将实例赋值给p_env.
+
+
+(线程在新建过程中如何对JNIEnv进行赋值的，就不细讲了，我提供几个关键的函数，runtime.cc的Create和Init、thread.cc的Attach和Init、
+jni_env_ext.cc的Create、jni_internal.cc的GetJniNativeInterface，涉及到的文件我都放在AOSP项目中，有兴趣的可以去看看. )
 
 ```C
 extern "C" jint JNI_CreateJavaVM(JavaVM** p_vm, JNIEnv** p_env, void* vm_args) {
@@ -182,7 +186,7 @@ extern "C" jint JNI_CreateJavaVM(JavaVM** p_vm, JNIEnv** p_env, void* vm_args) {
 }
 ```
 
-这个GetJniEnv返回的是一个JNINativeInterface的实例,定义在/platform/art/runtime/jni_internal.cc，其中就有我们要找的FindClass
+GetJniEnv返回的是一个JNINativeInterface的实例,定义在/platform/art/runtime/jni_internal.cc，其中就有我们要找的FindClass
 
 ```C
 const JNINativeInterface gJniNativeInterface = {
@@ -195,12 +199,19 @@ const JNINativeInterface gJniNativeInterface = {
   JNI::FindClass,
 }
 ```
-这个FindClass对应的是JNI::FindClass，定义在当前文件中,内部是通过ClassLoader的FindClass实现的
+我们看到实例中FindClass对应的函数是JNI::FindClass，定义在当前文件中,FindClass的工作是交给ClassLinker，
+ClassLinker内部的实现是通过ClassLoader获取一个ClassTable对象，再通过ClassTable中的一个HashSet得到对应的Class,
+ClassLoader其实我们也比较熟悉，Java层中就有，我们apk中的dex文件就是需要ClassLoader去加载，最终会将Class装进一个HashSet中，
+因此，我们FindClass也去这个HashSet中去找.
+
+(ClassLinker内部的实现我就不细讲了，我提供几个关键的函数，class_linker.cc的FindClass和LookupClass、class_table.cc的Lookup
+，涉及到的文件我都放在AOSP项目中，有兴趣同学可以去具体看看.)
+
 ```C
   static jclass FindClass(JNIEnv* env, const char* name) {
     CHECK_NON_NULL_ARGUMENT(name);
     Runtime* runtime = Runtime::Current();
-    ClassLinker* class_linker = runtime->GetClassLinker(); //获取ClassLoader
+    ClassLinker* class_linker = runtime->GetClassLinker(); //获取ClassLinker
     std::string descriptor(NormalizeJniClassDescriptor(name));
     ScopedObjectAccess soa(env);
     mirror::Class* c = nullptr;
@@ -214,6 +225,10 @@ const JNINativeInterface gJniNativeInterface = {
     return soa.AddLocalReference<jclass>(c);
   }
 ```
+
+
+说完env->FindClass，其实其他env->方式调用的函数也就大体知道源码在哪儿了，在接下来的分析中我就只说明下对应函数的作用，具体实现可以根据
+自己的需要深入去看.
 
 
 
