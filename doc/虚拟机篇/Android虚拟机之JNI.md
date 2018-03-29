@@ -238,8 +238,35 @@ env函数特别多，我这里只列举一些我们常用的
 
 |函数名|作用|类比Java|
 | :-- | :-- | :-- |
-|NewObjectArray|新建Object数组|new Object[]|
+|NewObject|新建Object|new Object|
 |NewStringUTF|新建String字符|new String()|
+|NewObjectArray|新建Object数组|new Object[]|
+|New(Type)Array|新建Type数组,如NewByteArray|new byte[]|
+
+获取和设置成员变量和类变量，相当于Java中的获取和设置变量，下面以A a=new A()为例子
+
+|函数名|作用|类比Java|
+| :-- | :-- | :-- |
+|GetFieldID|获取成员变量id,所有获取成员变量的方法都要传入这个值|--|
+|GetObjectField|获取Object类型的成员变量|a.object|
+|Get(Type)Field|获取Type类型的成员变量,如GetBooleanField|bool b=a.bool|
+|Set(Type)Field|设置Type类型的成员变量,如SetBooleanField|a.bool=b|
+|GetStaticFieldID|获取类变量id,所有获取类变量的方法都要传入这个值|--|
+|GetStaticObjectField|获取Object类型的类变量|A.object|
+|GetStatic(Type)Field|获取Type类型的类变量,如GetStaticBooleanField|bool b=A.bool|
+|SetStatic(Type)Field|设置Type类型的类变量,如SetStaticBooleanField|A.bool=b|
+
+调用成员方法和类方法，相当于Java中的调用方法，下面以A a=new A()为例子
+
+|函数名|作用|类比Java|
+| :-- | :-- | :-- |
+|GetMethodID|获取成员方法id,所有获取成员方法的方法都要传入这个值|--|
+|CallObjectMethod|调用返回值为Object类型的成员方法|Object o=a.a()|
+|Call(Type)Method|调用返回值为Type类型的成员方法,如CallBooleanMethod|bool b=a.b()|
+|GetStaticMethodID|获取类方法id,所有获取类方法的方法都要传入这个值|--|
+|CallStaticObjectMethod|调用返回值为Object类型的类方法|Object o=A.a()|
+|CallStatic(Type)Method|调用返回值为Type类型的类方法,如CallStaticBooleanMethod|bool b=A.b()|
+
 
 ## 二、Java调用C++
 
