@@ -230,7 +230,16 @@ ClassLoader其实我们也比较熟悉，Java层中就有，我们apk中的dex�
 说完env->FindClass，其实其他env->方式调用的函数也就大体知道源码在哪儿了，在接下来的分析中我就只说明下对应函数的作用，具体实现可以根据
 自己的需要深入去看.
 
+### 1.3 其他env函数
 
+env函数特别多，我这里只列举一些我们常用的
+
+新建实例，相当于Java中的new
+
+|函数名|作用|类比Java|
+| :-- | :-- | :-- |
+|NewObjectArray|新建Object数组|new Object[]|
+|NewStringUTF|新建String字符|new String()|
 
 ## 二、Java调用C++
 
