@@ -267,7 +267,11 @@ env函数特别多，我这里只列举一些我们常用的
 |CallStaticObjectMethod|调用返回值为Object类型的类方法|Object o=A.a()|
 |CallStatic(Type)Method|调用返回值为Type类型的类方法,如CallStaticBooleanMethod|bool b=A.b()|
 
-
+数组相关操作,以bool[] bs=new bool[] 为例
+|函数名|作用|类比Java|
+| :-- | :-- | :-- |
+|Get(Type)ArrayElements|获取Type类型的数组的某个元素|bool b=bs[0]|
+|Set(Type)ArrayElements|设置Type类型的数组的某个元素|bs[0]=b|
 ## 二、Java调用C++
 
 虚拟机创建好之后，系统就可以运行Java代码了，终于是我们熟悉的语法，读起来相对简单些，但是Java代码经常要用JNI调用native代码，
