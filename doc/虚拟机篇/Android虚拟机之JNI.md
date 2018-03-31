@@ -272,6 +272,13 @@ env函数特别多，我这里只列举一些我们常用的
 | :-- | :-- | :-- |
 |Get(Type)ArrayElements|获取Type类型的数组的某个元素|bool b=bs[0]|
 |Set(Type)ArrayElements|设置Type类型的数组的某个元素|bs[0]=b|
+
+内存释放相关，这个是C++独有的，没有Java相应的调用
+|函数名|作用|类比Java|
+| :-- | :-- | :-- |
+|ReleaseStringUTFChars|释放String|--|
+|Release(Typge)ArrayElements|释放Type类型的数组|--|
+
 ## 二、Java调用C++
 
 虚拟机创建好之后，系统就可以运行Java代码了，终于是我们熟悉的语法，读起来相对简单些，但是Java代码经常要用JNI调用native代码，
