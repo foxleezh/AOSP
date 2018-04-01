@@ -268,16 +268,77 @@ env函数特别多，我这里只列举一些我们常用的
 |CallStatic(Type)Method|调用返回值为Type类型的类方法,如CallStaticBooleanMethod|bool b=A.b()|
 
 数组相关操作,以bool[] bs=new bool[] 为例
+
 |函数名|作用|类比Java|
 | :-- | :-- | :-- |
 |Get(Type)ArrayElements|获取Type类型的数组的某个元素|bool b=bs[0]|
 |Set(Type)ArrayElements|设置Type类型的数组的某个元素|bs[0]=b|
 
 内存释放相关，这个是C++独有的，没有Java相应的调用
+
 |函数名|作用|类比Java|
 | :-- | :-- | :-- |
 |ReleaseStringUTFChars|释放String|--|
 |Release(Typge)ArrayElements|释放Type类型的数组|--|
+
+我这里只是笼统地列举了一些env函数的作用，对于参数及返回值并没有细讲，主要是这些属于API范畴的东西，要用的时候再查也不迟，
+我推荐几个网址吧，[英文官方](https://docs.oracle.com/javase/1.5.0/docs/guide/jni/spec/jniTOC.html),
+[中文手册](https://blog.csdn.net/darmao/article/details/70139100?locationNum=3&fps=1)
+
+### 1.4 函数签名
+
+start函数最后会调用main函数，在获取main函数时需要传递三个参数，第一个是函数所在的类，第二个是函数名称，第三个就是函数签名
+
+```C
+   jmethodID startMeth = env->GetStaticMethodID(startClass, "main", "([Ljava/lang/String;)V");
+```
+
+函数签名其实就是对一个函数的参数及返回值的一种符号表示，表示形式是 (params)return 下面我列举一下符号与Java类型的一一对应关系：
+
+基本数据类型和void,我们可以看到除了boolean和long表示得不一样外，其他都是以首字母进行表示，我想主要原因可能是B与byte冲突了，L与object冲突
+
+|符号|Java类型|
+| :-- | :-- |
+|B |byte|
+|C |char|
+|S |short|
+|I |int|
+|F |float|
+|D |double|
+|Z |boolean|
+|J |long|
+|V |void|
+
+引用数据类型和数组，引用数据类型以L开头，后面接完整路径，最后有个分号，这个分号一定不要忘记！一定不要忘记！一定不要忘记！
+
+|符号|Java类型|
+| :-- | :-- |
+|L/java/lang/String;|String|
+|[I|int[]|
+|[L/java/lang/object;|object[]|
+
+我们回到刚才的例子 ([Ljava/lang/String;)V ，这个就表示main函数的参数是String[],返回值是void.
+
+### 1.5 异常处理
+
+我们在Java中经常用try catch来处理异常非常方便，我们在C++中调用Java函数时，也可以去捕获异常，我们可以有两种方式：
+
+- ExceptionCheck
+- ExceptionOccurred
+
+我先讲讲 ExceptionCheck ，这个函数是会返回一个bool值，true表示有异常，false表示没有异常
+
+```C
+
+        env->CallStaticVoidMethod(env,cls,mid);
+    printf("In C: Java_com_study_jnilearn_JNIException_doit-->called!!!!");
+    if (env->ExceptionCheck(env)) {  // 检查JNI调用是否有引发异常
+        env->ExceptionDescribe(env);
+        env->ExceptionClear(env);        // 清除引发的异常，在Java层不会打印异常的堆栈信息
+        env->ThrowNew(env,env->FindClass(env,"java/lang/Exception"),"JNI抛出的异常！");
+        //return;
+    }
+```
 
 ## 二、Java调用C++
 
