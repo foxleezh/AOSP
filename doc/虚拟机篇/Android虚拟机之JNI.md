@@ -330,31 +330,33 @@ start函数最后会调用main函数，在获取main函数时需要传递三个�
 
 ```C
     env->CallStaticVoidMethod(cls,mid);
-    if (env->ExceptionCheck(env)) {  // 检查JNI调用是否有引发异常
-        env->ExceptionDescribe(env);
-        env->ExceptionClear(env);        // 清除引发的异常，在Java层不会打印异常的堆栈信息
-        env->ThrowNew(env,env->FindClass(env,"java/lang/Exception"),"JNI抛出的异常！");
-        //return;
+    if (env->ExceptionCheck()) {  // 检查JNI调用是否有引发异常
+        env->ExceptionDescribe(); //打印错误日志堆栈信息
+        env->ExceptionClear(); // 清除引发的异常
+        env->ThrowNew(env->FindClass(env,"java/lang/Exception"),"JNI抛出的异常！"); //抛出异常
     }
 ```
 
+再看看ExceptionOccurred，这个用法其实跟ExceptionCheck差不多,只是它返回的不是bool值，而是当前异常的引用
+
+```C
+jthrowable exc = NULL;
+exc = env->ExceptionOccurred();  // 返回一个指向当前异常对象的引用
+if (exc) {
+    env->ExceptionDescribe(); //打印错误日志堆栈信息
+    env->ExceptionClear(); // 清除引发的异常
+    env->ThrowNew(env->FindClass(env,"java/lang/Exception"),"JNI抛出的异常！"); //抛出异常
+}
+```
+
+
 ## 二、Java调用C++
 
-虚拟机创建好之后，系统就可以运行Java代码了，终于是我们熟悉的语法，读起来相对简单些，但是Java代码经常要用JNI调用native代码，
-如果我们要了解native的具体实现，我们就必须找到对应的JNI注册函数，说实话还挺不好找的，有些我都是全局搜索才找到的，我具体讲代码的时候再说如何去找native代码实现。
-接下来我将分析ZygoteInit的main函数，我将拆分为四个部分来讲：
-- 开启性能统计
-- 注册Socket
-- 加载资源
-- 开启守护循环
+讲完了C++调用Java，我们再看看Java如何调用C++,我们接着前面的讲，之前通过 env->CallStaticVoidMethod(startClass, startMeth, strArray)
+调用了ZygoteInit的 main 函数，我们就以main函数为例讲解Java调用C++的过程。
 
-### 4.1 开启性能统计
+### 2.1 main
 定义在platform/frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
-
-main函数最开始new了一个ZygoteServer，这个后续会用到，然后设置标记，不允许新建线程，为什么不允许多线程呢？
-这主要是担心用户创建app时，多线程情况下某些预先加载的资源没加载好，这时去调用会出问题. 接着设置了zygote进程的进程组id，
-最后便是一系列性能统计相关的动作
-
 
 ```java
 public static void main(String argv[]) {
@@ -371,26 +373,15 @@ public static void main(String argv[]) {
             throw new RuntimeException("Failed to setpgid(0,0)", ex);
         }
 
-        try {
-            // Report Zygote start time to tron unless it is a runtime restart
-            if (!"1".equals(SystemProperties.get("sys.boot_completed"))) {
-                MetricsLogger.histogram(null, "boot_zygote_init",
-                        (int) SystemClock.elapsedRealtime());//记录boot_zygote_init时间戳
-            }
-
-            String bootTimeTag = Process.is64Bit() ? "Zygote64Timing" : "Zygote32Timing";
-            BootTimingsTraceLog bootTimingsTraceLog = new BootTimingsTraceLog(bootTimeTag,
-                    Trace.TRACE_TAG_DALVIK);
-            bootTimingsTraceLog.traceBegin("ZygoteInit"); //跟踪调试ZygoteInit
-            RuntimeInit.enableDdms(); //开启DDMS
-            // Start profiling the zygote initialization.
-            SamplingProfilerIntegration.start(); //开始性能统计
-            ...
-            SamplingProfilerIntegration.writeZygoteSnapshot();//结束性能统计并写入文件
+        ...
 
 }
 
 ```
+
+main函数最开始new了一个ZygoteServer，这个后续会用到，然后设置标记，不允许新建线程，为什么不允许多线程呢？
+这主要是担心用户创建app时，多线程情况下某些预先加载的资源没加载好，这时去调用会出问题. 接着设置了zygote进程的进程组id，
+最后便是一系列性能统计相关的动作
 
 #### 4.1.1 startZygoteNoThreadCreation
 定义在platform/libcore/dalvik/src/main/java/dalvik/system/ZygoteHooks中
@@ -614,107 +605,5 @@ static void Linux_setpgid(JNIEnv* env, jobject, jint pid, int pgid) {
 这个系统调的作用是设置进程组id，第一个参数pid是指设置哪个进程所属的进程组，如果是0,就是当前进程所属的进程组，第二个参数是设置的id值，
 如果是0,那么就把当前进程的pid作为进程组的id. 所以setgpid（0,0）的意思就是将zygote进程所在进程组id设置为zygote的pid
 
-#### 4.1.3 性能统计
 
-性能统计这块主要有两个
-
-```java
-public static void main(String argv[]) {
-
-            ...
-
-            boolean startSystemServer = false;
-            String socketName = "zygote";
-            String abiList = null;
-            boolean enableLazyPreload = false;
-            for (int i = 1; i < argv.length; i++) {
-                if ("start-system-server".equals(argv[i])) {
-                    startSystemServer = true;
-                } else if ("--enable-lazy-preload".equals(argv[i])) {
-                    enableLazyPreload = true;
-                } else if (argv[i].startsWith(ABI_LIST_ARG)) {
-                    abiList = argv[i].substring(ABI_LIST_ARG.length());
-                } else if (argv[i].startsWith(SOCKET_NAME_ARG)) {
-                    socketName = argv[i].substring(SOCKET_NAME_ARG.length());
-                } else {
-                    throw new RuntimeException("Unknown command line argument: " + argv[i]);
-                }
-            }
-
-            if (abiList == null) {
-                throw new RuntimeException("No ABI list supplied.");
-            }
-            zygoteServer.registerServerSocket(socketName);
-            ...
-}
-```
-
-```java
- public static void main(String argv[]) {
-
-            ...
-
-            // In some configurations, we avoid preloading resources and classes eagerly.
-            // In such cases, we will preload things prior to our first fork.
-            if (!enableLazyPreload) {
-                bootTimingsTraceLog.traceBegin("ZygotePreload");
-                EventLog.writeEvent(LOG_BOOT_PROGRESS_PRELOAD_START,
-                    SystemClock.uptimeMillis());
-                preload(bootTimingsTraceLog);
-                EventLog.writeEvent(LOG_BOOT_PROGRESS_PRELOAD_END,
-                    SystemClock.uptimeMillis());
-                bootTimingsTraceLog.traceEnd(); // ZygotePreload
-            } else {
-                Zygote.resetNicePriority();
-            }
-
-            // Finish profiling the zygote initialization.
-            SamplingProfilerIntegration.writeZygoteSnapshot();
-
-            // Do an initial gc to clean up after startup
-            bootTimingsTraceLog.traceBegin("PostZygoteInitGC");
-            gcAndFinalize();
-            bootTimingsTraceLog.traceEnd(); // PostZygoteInitGC
-
-            bootTimingsTraceLog.traceEnd(); // ZygoteInit
-            // Disable tracing so that forked processes do not inherit stale tracing tags from
-            // Zygote.
-            Trace.setTracingEnabled(false);
-
-            ...
-
-}
-```
-
-
-```java
- public static void main(String argv[]) {
-
-            ...
-
-            // Zygote process unmounts root storage spaces.
-            Zygote.nativeUnmountStorageOnInit();
-
-            // Set seccomp policy
-            Seccomp.setPolicy();
-
-            ZygoteHooks.stopZygoteNoThreadCreation();
-
-            if (startSystemServer) {
-                startSystemServer(abiList, socketName, zygoteServer);
-            }
-
-            Log.i(TAG, "Accepting command socket connections");
-            zygoteServer.runSelectLoop(abiList);
-
-            zygoteServer.closeServerSocket();
-        } catch (Zygote.MethodAndArgsCaller caller) {
-            caller.run();
-        } catch (Throwable ex) {
-            Log.e(TAG, "System zygote died with exception", ex);
-            zygoteServer.closeServerSocket();
-            throw ex;
-        }
-    }
-```
 
