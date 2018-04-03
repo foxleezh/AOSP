@@ -329,9 +329,7 @@ start函数最后会调用main函数，在获取main函数时需要传递三个�
 我先讲讲 ExceptionCheck ，这个函数是会返回一个bool值，true表示有异常，false表示没有异常
 
 ```C
-
-        env->CallStaticVoidMethod(env,cls,mid);
-    printf("In C: Java_com_study_jnilearn_JNIException_doit-->called!!!!");
+    env->CallStaticVoidMethod(cls,mid);
     if (env->ExceptionCheck(env)) {  // 检查JNI调用是否有引发异常
         env->ExceptionDescribe(env);
         env->ExceptionClear(env);        // 清除引发的异常，在Java层不会打印异常的堆栈信息
