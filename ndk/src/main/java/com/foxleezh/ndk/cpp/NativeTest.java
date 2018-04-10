@@ -6,7 +6,5 @@ package com.foxleezh.ndk.cpp;
 
 public class NativeTest {
 
-
-
     public static native String getString();
 }
