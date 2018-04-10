@@ -4,8 +4,9 @@ package com.foxleezh.ndk;
 import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
 import android.widget.Button;
-import com.foxleezh.ndk.cpp.ChartNative;
-import com.foxleezh.ndk.cpp.ChartNative1;
+import android.widget.TextView;
+
+import com.foxleezh.ndk.cpp.NativeTest;
 
 
 public class MainActivity extends AppCompatActivity {
@@ -17,9 +18,8 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         // Example of a call to a native method
-        Button btn = findViewById(R.id.sample_text);
-        String str = ChartNative.getString();
-        String str1 = ChartNative1.getString();
+        TextView btn = findViewById(R.id.sample_text);
+        String str = NativeTest.getString();
         btn.setText(str);
     }
 

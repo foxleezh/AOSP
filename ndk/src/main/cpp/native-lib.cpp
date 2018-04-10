@@ -1,11 +1,12 @@
 #include <jni.h>
 #include <string>
 
-extern "C" {
+extern "C"
+JNIEXPORT jstring
 
-JNIEXPORT jstring JNICALL Java_com_foxleezh_ndk_cpp_ChartNative_getString
+JNICALL
+Java_com_foxleezh_ndk_cpp_NativeTest_getString
         (JNIEnv *env, jclass){
-    return env->NewStringUTF("跳转RN");
-}
-
+    std::string hello = "Hello from C++";
+    return env->NewStringUTF(hello.c_str());
 }

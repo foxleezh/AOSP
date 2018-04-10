@@ -4,8 +4,6 @@ import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.widget.TextView;
 
-import com.foxleezh.frog.ndktest.R;
-
 public class MainActivity extends AppCompatActivity {
 
     // Used to load the 'native-lib' library on application startup.
