@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <string>
 #include<android/log.h>
+#include <stdlib.h>
 
 #define TAG  "jni-test"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG,TAG,__VA_ARGS__);
