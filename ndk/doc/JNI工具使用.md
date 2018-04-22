@@ -3,3 +3,9 @@
 ```shell
 javah -d ../cpp com.foxleezh.ndk.cpp.NativeTest
 ```
+
+## 查看Java类的签名信息
+找到java类对应的.class文件，在目录build/intermediates/classes/debug下运行如下命令：
+```shell
+javap -s com.foxleezh.ndk.JavaTest
+```
