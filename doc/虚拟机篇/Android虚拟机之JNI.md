@@ -131,7 +131,7 @@ void AndroidRuntime::start(const char* className, const Vector<String8>& options
 但是这个env是指特定线程的环境，也就是说一个线程对应一个env. <br>
 
 env有许多的函数，FindClass只是其中一个，作用就是根据ClassName找到对应的class，
-用法是不是跟Java中反射获取Class有点像,其实Java反射也是native方法，而在实现上也是跟env->FindClass一样.
+用法是不是跟Java中反射获取Class有点像,其实Java反射也是native方法，也得走到C++层，在实现上也是跟env->FindClass一样.
 
 我们来具体看看env->FindClass的实现,env的类型是JNIEnv,定义在platform/libnativehelper/include/nativehelper/jni.h中,
 这个JNIEnv 在C环境和C++环境类型不一样，在C环境中定义的是JNINativeInterface* ，
@@ -167,8 +167,8 @@ struct JNINativeInterface {
 
 那这个结构体JNINativeInterface中FindClass的函数指针什么时候赋值的呢？还记得上文中有个创建虚拟机的函数JNI_CreateJavaVM,
 里面有个参数就是JNIEnv,其实也就是在创建虚拟机的时候把函数指针赋值的，我们知道JNI_CreateJavaVM是加载libart.so时获取的，
-那我们就得找libart.so的源码，这个对应的源码在platform/art/runtime/java_vm_ext.cc,它会调用Runtime::Create函数去新建
-线程，在线程新建的过程中会对JNIEnv进行赋值，JNI_CreateJavaVM函数最后会去调用线程的GetJniEnv得到JNIEnv的实例，将实例赋值给p_env.
+那我们就得找libart.so的源码，这个对应的源码在platform/art/runtime/java_vm_ext.cc,它会调用Runtime::Create函数去新建线程，
+在线程新建的过程中会对JNIEnv进行赋值，JNI_CreateJavaVM函数最后会去调用线程的GetJniEnv得到JNIEnv的实例，将实例赋值给p_env.
 
 
 (线程在新建过程中如何对JNIEnv进行赋值的，就不细讲了，我提供几个关键的函数，runtime.cc的Create和Init、thread.cc的Attach和Init、
@@ -281,9 +281,7 @@ env函数特别多，我这里只列举一些我们常用的
 |ReleaseStringUTFChars|释放String|--|
 |Release(Typge)ArrayElements|释放Type类型的数组|--|
 
-我这里只是笼统地列举了一些env函数的作用，对于参数及返回值并没有细讲，主要是这些属于API范畴的东西，要用的时候再查也不迟，
-我推荐几个网址吧，[英文官方](https://docs.oracle.com/javase/1.5.0/docs/guide/jni/spec/jniTOC.html),
-[中文手册](https://blog.csdn.net/darmao/article/details/70139100?locationNum=3&fps=1)
+我这里只是笼统地列举了一些env函数的作用，对于参数及返回值并没有细讲，主要是这些属于API范畴的东西，要用的时候再查也不迟
 
 ### 1.4 函数签名
 
@@ -309,7 +307,7 @@ start函数最后会调用main函数，在获取main函数时需要传递三个�
 |J |long|
 |V |void|
 
-引用数据类型和数组，引用数据类型以L开头，后面接完整路径，最后有个分号，这个分号一定不要忘记！一定不要忘记！一定不要忘记！
+引用数据类型和数组，引用数据类型以L开头，后面接完整路径，最后有个分号，这个分号一定不要忘记！一定不要忘记！一定不要忘记！数组用 [ 表示
 
 |符号|Java类型|
 | :-- | :-- |
@@ -349,13 +347,16 @@ if (exc) {
 }
 ```
 
+start函数最后就用到了ExceptionCheck，因为调用Java的方法是可能引发异常的
 
 ## 二、Java调用C++
 
 讲完了C++调用Java，我们再看看Java如何调用C++,我们接着前面的讲，之前通过 env->CallStaticVoidMethod(startClass, startMeth, strArray)
 调用了ZygoteInit的 main 函数，我们就以main函数为例讲解Java调用C++的过程。
 
-### 2.1 native注册
+### 2.1 main函数
+
+main函数开头有两个方法调用 startZygoteNoThreadCreation和setpgid，这两个其实都是native方法，接下来我就以这两个为例子。
 
 ```java
 public static void main(String argv[]) {
@@ -387,7 +388,9 @@ startZygoteNoThreadCreation 定义在platform/libcore/dalvik/src/main/java/dalvi
     public static native void startZygoteNoThreadCreation();
 ```
 
-这是一个native方法，我们知道native方法有两种注册方式，一种是静态注册，一种动态注册。
+### 2.2 native注册
+
+startZygoteNoThreadCreation 是一个native方法，我们知道native方法有两种注册方式，一种是静态注册，一种动态注册。
 
 所谓静态注册就是根据函数名称和一些关键字就可以注册，
 比如 startZygoteNoThreadCreation 要静态注册的话，它对应的实现函数应该是
@@ -396,16 +399,20 @@ JNIEXPORT void JNICALL Java_dalvik_system_ZygoteHooks_startZygoteNoThreadCreatio
 }
 
 ```
-也就是说首先得有JNIEXPORT，JNICALL这些关键字，其实函数名称必须以Java开头，后面接的是native函数所在类的完整路径加native函数名，
-最后参数及返回值要相同，参数会多出两个，一个是JNIEnv，表示JNI上下文，一个是jobject，表示调用native函数的对象. 只要你按照这个规则写，
-Java的native函数就会自动调用这个C++层的函数。这种静态的注册方式有个不好的地方就是函数名太长，书写不方便，而且在首次调用时会有一个注册过程，
+也就是说首先得有JNIEXPORT，JNICALL这些关键字，其次函数名称必须以Java开头，后面接的是native函数所在类的完整路径加native函数名，
+最后参数及返回值要相同，参数会多出两个：
+
+- JNIEnv，表示JNI上下文，
+- 一个是jobject，如果是static方法表示调用native函数的Class. 如果是普通方法表示调用native函数的对象
+
+只要你按照这个规则写，Java的native函数就会自动调用这个C++层的函数。这种静态的注册方式有个不好的地方就是函数名太长，书写不方便，而且在首次调用时会有一个注册过程，
 影响效率，那有没有其他方式呢？答案就是动态注册
 
 其实大多数frameworks层的native函数都是用动态方式注册的，startZygoteNoThreadCreation函数也是
 
 我们怎么寻找startZygoteNoThreadCreation的实现呢？这里有个规律，Google工程师喜欢以native所在类的完整路径为C++的实现类名，比如
-startZygoteNoThreadCreation所在类的完整路径是dalvik.system.ZygoteHooks，我们尝试寻找dalvik_system_ZygoteHooks这个文件，
-果然出现了dalvik_system_ZygoteHooks.h和dalvik_system_ZygoteHooks.cc，我们看下dalvik_system_ZygoteHooks.cc
+startZygoteNoThreadCreation所在类的完整路径是dalvik.system.ZygoteHooks，我们尝试搜索dalvik_system_ZygoteHooks，
+就会出现dalvik_system_ZygoteHooks.h和dalvik_system_ZygoteHooks.cc，我们看下dalvik_system_ZygoteHooks.cc
 
 ```C
 static JNINativeMethod gMethods[] = {
@@ -420,19 +427,11 @@ void register_dalvik_system_ZygoteHooks(JNIEnv* env) {
 }
 ```
 
-好像有点苗头了，gMethods数组中有我们要的startZygoteNoThreadCreation，这个数组的类型是JNINativeMethod，但是数组中却是
-NATIVE_METHOD，我们看看这个NATIVE_METHOD是什么
+本来动态注册是个很简单的过程，直接调用 env->RegisterNatives ，将绑定信息作为参数即可，但是这个源码里写得比较复杂，我一步步讲吧
 
-```C
-#define NATIVE_METHOD(className, functionName, signature) \
-{ #functionName, signature, (void*)(className ## _ ## functionName) }
-```
-如何理解这个定义呢？#define是宏定义，也就是说编译期间要做宏替换，这里就是把NATIVE_METHOD替换成
-{"","",(void*)()},具体怎么替换呢？我们看到{}里有些#、##，#表示字符串化，##表示字符串化拼接，相当于Java中的
-String.format,以NATIVE_METHOD(ZygoteHooks, startZygoteNoThreadCreation, "()V")为例，替换后就是
-{"startZygoteNoThreadCreation","()V",(void*)(ZygoteHooks_startZygoteNoThreadCreation) }
+首先Java的native方法要调用到C++函数，肯定得有个键值对作为绑定信息，也就是告诉虚拟机哪个native该执行哪个C++函数，gMethods就是这样一个角色
 
-我们再回顾下 JNINativeMethod ，它是一个结构体,name表示native函数名，signature表示用字符串描述native函数的参数和返回值,
+gMethods数组的类型是JNINativeMethod，我们回顾下 JNINativeMethod ，它是一个结构体,name表示native函数名，signature表示用字符串描述native函数的参数和返回值,
 fnPtr表示native指向的C++函数指针,这其实就是动态注册的映射关系了，将native函数对应一个C++函数
 ```C
 typedef struct {
@@ -442,8 +441,22 @@ void* fnPtr;
 } JNINativeMethod;
 ```
 
+但是gMethods数组中却是NATIVE_METHOD，我们看看这个NATIVE_METHOD是什么
+
+```C
+#define NATIVE_METHOD(className, functionName, signature) \
+{ #functionName, signature, (void*)(className ## _ ## functionName) }
+```
+
+如何理解这个定义呢？#define是宏定义，也就是说编译期间要做宏替换，这里就是把NATIVE_METHOD替换成
+{"","",(void*)()},具体怎么替换呢？我们看到{}里有些#、##，#表示字符串化，相当于Java中的toString，##表示字符串化拼接，相当于Java中的
+String.format,以NATIVE_METHOD(ZygoteHooks, startZygoteNoThreadCreation, "()V")为例，替换后就是
+{"startZygoteNoThreadCreation","()V",(void*)(ZygoteHooks_startZygoteNoThreadCreation) }
+
+
 JNINativeMethod只是个结构体，真正注册的函数是在 REGISTER_NATIVE_METHODS("dalvik/system/ZygoteHooks")，我们先看看
 REGISTER_NATIVE_METHODS
+
 ```c
 #define REGISTER_NATIVE_METHODS(jni_class_name) \
   RegisterNativeMethods(env, jni_class_name, gMethods, arraysize(gMethods))
@@ -600,4 +613,8 @@ static void Linux_setpgid(JNIEnv* env, jobject, jint pid, int pgid) {
 如果是0,那么就把当前进程的pid作为进程组的id. 所以setgpid（0,0）的意思就是将zygote进程所在进程组id设置为zygote的pid
 
 
+**小结**
 
+作为进入Java世界的铺垫，本篇讲解了C++与Java之间的桥梁JNI，有了它，C++和Java就可以相互调用，本文只是讲了一些皮毛的东西，
+要深入理解和使用JNI，请参考[英文官方](https://docs.oracle.com/javase/1.5.0/docs/guide/jni/spec/jniTOC.html),
+         [中文手册](https://blog.csdn.net/darmao/article/details/70139100?locationNum=3&fps=1)
