@@ -283,7 +283,10 @@ prop_area 这个在context_node里引用，属性data是具体key-value的数据
 
 ![](http://upload-images.jianshu.io/upload_images/3387045-a8453c6017bbf63f.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240)
 
-prop_info 就是具体的key-value了，这个是从prop_area解析出来的
+
+这种结构的好处是查找快，就像我们电脑里的目录一样，prop_area是个数据库，里面的基本结构是prop_bt，prop_bt里面有name,left,right,children,prop,其中prop是prop_info结构
+
+prop_info 就是具体的key-value了，我们键值对信息就存在这里面
 
 ```C
 class context_node {
@@ -348,6 +351,17 @@ class prop_area {
 
   DISALLOW_COPY_AND_ASSIGN(prop_area);
 };
+
+
+struct prop_bt {
+  uint32_t namelen;
+  atomic_uint_least32_t prop;
+  atomic_uint_least32_t left;
+  atomic_uint_least32_t right;
+  atomic_uint_least32_t children;
+  char name[0];
+};
+
 
 struct prop_info {
   atomic_uint_least32_t serial;
