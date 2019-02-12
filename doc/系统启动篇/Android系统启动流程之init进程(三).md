@@ -365,7 +365,7 @@ int main(int argc, char** argv) {
 ### 2.1 ParseConfig
 定义在 platform/system/core/init/init_parser.cpp
 
-首先是判断传入的是目录还是文件，其实他们都是调用ParseConfigFile，ParseConfigDir就是遍历下该目录中的文件，对文件排个序,然后调用ParseConfigFile.
+
 ```C
 bool Parser::ParseConfig(const std::string& path) {
     if (is_dir(path.c_str())) {
@@ -374,8 +374,9 @@ bool Parser::ParseConfig(const std::string& path) {
     return ParseConfigFile(path);
 }
 ```
-而ParseConfigFile就是读取文件中的数据后，将数据传递给ParseData函数,最后遍历section_parsers_调用其EndFile函数，
-EndFile后面再分析，因为是多态实现，我们先看看ParseData
+
+首先是判断传入的是目录还是文件，其实他们都是调用ParseConfigFile，ParseConfigDir就是遍历下该目录中的文件，对文件排个序,然后调用ParseConfigFile.
+
 
 ```C
 bool Parser::ParseConfigFile(const std::string& path) {
@@ -397,12 +398,12 @@ bool Parser::ParseConfigFile(const std::string& path) {
 }
 ```
 
+ParseConfigFile就是读取文件中的数据后，将数据传递给ParseData函数,最后遍历section_parsers_调用其EndFile函数，
+EndFile后面再分析，因为是多态实现，我们先看看ParseData
+
 ### 2.2 ParseData
 ParseData 定义在 platform/system/core/init/init_parser.cpp
 
-ParseData通过调用next_token函数遍历每一个字符，以空格或""为分割将一行拆分成若干个单词，调用T_TEXT将单词放到args数组中，
-当读到回车符就调用T_NEWLINE，在section_parsers_这个map中找到对应的on service import的解析器，执行ParseSection，如果在
-map中找不到对应的key，就执行ParseLineSection，当读到0的时候，表示一个Section读取结束，调用T_EOF执行EndSection.
 
 ```C
 void Parser::ParseData(const std::string& filename, const std::string& data) {
@@ -464,7 +465,12 @@ void Parser::ParseData(const std::string& filename, const std::string& data) {
 
 ```
 
-这里其实涉及到on service import对应的三个解析器ActionParser,ServiceParser,ImportParser,它们是在之前加入到section_parsers_这个map中的
+
+ParseData通过调用next_token函数遍历每一个字符，以空格或""为分割将一行拆分成若干个单词，调用T_TEXT将单词放到args数组中，
+当读到回车符就调用T_NEWLINE，在section_parsers_这个map中找到对应的on service import的解析器，执行ParseSection，如果在
+map中找不到对应的key，就执行ParseLineSection，当读到0的时候，表示一个Section读取结束，调用T_EOF执行EndSection.
+
+
 ```C
     Parser& parser = Parser::GetInstance();
     parser.AddSectionParser("service",std::make_unique<ServiceParser>());
@@ -477,7 +483,8 @@ void Parser::ParseData(const std::string& filename, const std::string& data) {
     }
 ```
 
-它们都是SectionParser的子类,SectionParser有四个纯虚函数，分别是ParseSection、ParseLineSection、EndSection，EndFile.
+这里其实涉及到on service import对应的三个解析器ActionParser,ServiceParser,ImportParser,它们是在之前加入到section_parsers_这个map中的
+
 
 ```C
 class SectionParser {
@@ -498,12 +505,15 @@ public:
     virtual void EndFile(const std::string& filename) = 0;
 };
 ```
+
+它们都是SectionParser的子类,SectionParser有四个纯虚函数，分别是ParseSection、ParseLineSection、EndSection，EndFile.
+
+
 接下来我将分析这三个Perser的ParseSection、ParseLineSection、EndSection，EndFile具体实现
 
 ### 2.3 ActionParser
 定义在platform/system/core/init/action.cpp
 
-我们先看ParseSection，它先将args中下标1到结尾的数据复制到triggers数组中，然后是构建Action对象，调用InitTriggers,解析这些trigger
 ```C
 bool ActionParser::ParseSection(const std::vector<std::string>& args,
                                 std::string* err) {
@@ -523,8 +533,9 @@ bool ActionParser::ParseSection(const std::vector<std::string>& args,
 }
 ```
 
-InitTriggers通过比较是否以"property:"开头，区分trigger的类型，如果是property trigger，就调用ParsePropertyTrigger，
-如果是event trigger,就将args的参数赋值给event_trigger_，类型是string
+ParseSection，它先将args中下标1到结尾的数据复制到triggers数组中，然后是构建Action对象，调用InitTriggers,解析这些trigger
+
+
 ```C
 bool Action::InitTriggers(const std::vector<std::string>& args, std::string* err) {
     const static std::string prop_str("property:");
@@ -546,7 +557,10 @@ bool Action::InitTriggers(const std::vector<std::string>& args, std::string* err
 }
 ```
 
-ParsePropertyTrigger函数先是将字符以"="分割为name-value，然后将name-value存入property_triggers_这个map中
+InitTriggers通过比较是否以"property:"开头，区分trigger的类型，如果是property trigger，就调用ParsePropertyTrigger，
+如果是event trigger,就将args的参数赋值给event_trigger_，类型是string
+
+
 ```C
 bool Action::ParsePropertyTrigger(const std::string& trigger, std::string* err) {
     const static std::string prop_str("property:");
@@ -569,10 +583,12 @@ bool Action::ParsePropertyTrigger(const std::string& trigger, std::string* err) 
 }
 ```
 
+ParsePropertyTrigger函数先是将字符以"="分割为name-value，然后将name-value存入property_triggers_这个map中
+
 从上面看出，ParseSection函数的作用就是构造一个Action对象，将trigger条件记录到Action这个对象中，如果是event trigger就赋值给event_trigger_，
 如果是property trigger就存放到property_triggers_这个map中. 接下来我们分析ParseLineSection
 
-ParseLineSection是直接调用Action对象的AddCommand函数
+
 ```C
 bool ActionParser::ParseLineSection(const std::vector<std::string>& args,
                                     const std::string& filename, int line,
@@ -581,8 +597,9 @@ bool ActionParser::ParseLineSection(const std::vector<std::string>& args,
 }
 ```
 
-AddCommand看名字就大概知道是添加命令，它首先是做一些参数空值的检查，然后是调用FindFunction查找命令对应的执行函数，
-最后将这些信息包装成Command对象存放到commands_数组中，这里比较关键的就是FindFunction
+ParseLineSection是直接调用Action对象的AddCommand函数
+
+
 
 ```C
 bool Action::AddCommand(const std::vector<std::string>& args,
@@ -605,12 +622,13 @@ void Action::AddCommand(BuiltinFunction f,
 }
 ```
 
+AddCommand看名字就大概知道是添加命令，它首先是做一些参数空值的检查，然后是调用FindFunction查找命令对应的执行函数，
+最后将这些信息包装成Command对象存放到commands_数组中，这里比较关键的就是FindFunction
+
+
 FindFunction定义在platform/system/core/init/keyword_map.h
 
-这个函数主要作用是通过命令查找对应的执行函数，比如.rc文件中定义chmod,那我们得找到chmod具体去执行哪个函数. 它首先是通过map()返回一个std:map，调用其find函数，
-find相当于Java中的get，但是返回的是entry,可以通过entry ->first和entry ->second获取key-value.
-找到的value是一个结构体，里面有三个值，第一个是参数最小数目，第二个是参数最大数目，第三个就是执行函数，
-之后作了参数的数目检查，也就是说命令后的参数要在最小值和最大值之间.
+
 
 ```C
 const Function FindFunction(const std::string& keyword,
@@ -651,10 +669,15 @@ const Function FindFunction(const std::string& keyword,
     }
 ```
 
+这个函数主要作用是通过命令查找对应的执行函数，比如.rc文件中定义chmod,那我们得找到chmod具体去执行哪个函数. 它首先是通过map()返回一个std:map，调用其find函数，
+find相当于Java中的get，但是返回的是entry,可以通过entry ->first和entry ->second获取key-value.
+找到的value是一个结构体，里面有三个值，第一个是参数最小数目，第二个是参数最大数目，第三个就是执行函数，
+之后作了参数的数目检查，也就是说命令后的参数要在最小值和最大值之间.
+
+
 我们看看map()的实现,定义在platform/system/core/init/builtins.cpp
 
-这个实现比较简单，就是直接构造一个map，然后返回. 比如{"bootchart", {1,1,do_bootchart}},
-表示命令名称叫bootchart，对应的执行函数是do_bootchart，允许传入的最小和最大参数数量是1
+
 ```C
 BuiltinFunctionMap::Map& BuiltinFunctionMap::map() const {
     constexpr std::size_t kMax = std::numeric_limits<std::size_t>::max(); //表示size_t的最大值
@@ -710,7 +733,10 @@ BuiltinFunctionMap::Map& BuiltinFunctionMap::map() const {
 
 ```
 
-接下来我们看看EndSection,直接是调用ActionManager::GetInstance().AddAction
+这个实现比较简单，就是直接构造一个map，然后返回. 比如{"bootchart", {1,1,do_bootchart}},
+表示命令名称叫bootchart，对应的执行函数是do_bootchart，允许传入的最小和最大参数数量是1
+
+接下来我们看看EndSection
 
 ```C
 void ActionParser::EndSection() {
@@ -719,8 +745,9 @@ void ActionParser::EndSection() {
     }
 }
 ```
+直接是调用ActionManager::GetInstance().AddAction
 
-AddAction首先是查找是否有存在的同名Action，如果有就将他们的命令合并，没有就将它存入数组actions_中
+
 ```C
 void ActionManager::AddAction(std::unique_ptr<Action> action) {
     auto old_action_it =
@@ -748,7 +775,10 @@ void Action::CombineAction(const Action& action) {
 }
 ```
 
+AddAction首先是查找是否有存在的同名Action，如果有就将他们的命令合并，没有就将它存入数组actions_中
+
 EndFile是一个空实现,定义在platform/system/core/init/action.h
+
 ```C
 class ActionParser : public SectionParser {
 public:
@@ -778,7 +808,6 @@ private:
 
 我们还是分析它的四个函数ParseSection、ParseLineSection、EndSection、EndFile
 
-ParseSection首先是判断单词个数至少有三个，因为必须有一个服务名称和执行文件,然后是判断名称是否合法，主要是一些长度及内容的检查，最后就是构造一个Service对象
 ```C
 bool ServiceParser::ParseSection(const std::vector<std::string>& args,
                                  std::string* err) {
@@ -798,8 +827,9 @@ bool ServiceParser::ParseSection(const std::vector<std::string>& args,
     return true;
 }
 ```
+ParseSection首先是判断单词个数至少有三个，因为必须有一个服务名称和执行文件,然后是判断名称是否合法，主要是一些长度及内容的检查，最后就是构造一个Service对象
 
-ParseLineSection直接执行Service的ParseLine函数
+
 ```C
 bool ServiceParser::ParseLineSection(const std::vector<std::string>& args,
                                      const std::string& filename, int line,
@@ -807,9 +837,9 @@ bool ServiceParser::ParseLineSection(const std::vector<std::string>& args,
     return service_ ? service_->ParseLine(args, err) : false;
 }
 ```
+ParseLineSection直接执行Service的ParseLine函数
 
-ParseLine的思路跟之前Action一样，就是根据option名称从map中找到对应的执行函数,然后执行这个函数.
-这些执行函数主要作用就是对传入参数做一些处理，然后将信息记录到Service对象中
+
 
 ```C
 bool Service::ParseLine(const std::vector<std::string>& args, std::string* err) {
@@ -828,6 +858,8 @@ bool Service::ParseLine(const std::vector<std::string>& args, std::string* err) 
     return (this->*parser)(args, err);//执行找到的这个函数
 }
 ```
+ParseLine的思路跟之前Action一样，就是根据option名称从map中找到对应的执行函数,然后执行这个函数.
+这些执行函数主要作用就是对传入参数做一些处理，然后将信息记录到Service对象中
 
 map()返回的map如下,定义在定义在platform/system/core/init/service.cpp中
 
@@ -863,7 +895,7 @@ Service::OptionParserMap::Map& Service::OptionParserMap::map() const {
 }
 ```
 
-接下来我们看看EndSection，直接调用ServiceManager的AddService函数
+接下来我们看看EndSection
 
 ```C
 void ServiceParser::EndSection() {
@@ -872,9 +904,9 @@ void ServiceParser::EndSection() {
     }
 }
 ```
+直接调用ServiceManager的AddService函数
 
-AddService的实现比较简单，就是通过比较service的name，查看存放Service的数组services_中是否有同名的service，如果有就打印下错误日志，直接返回，
-如果不存在就加入数组中
+
 ```C
 void ServiceManager::AddService(std::unique_ptr<Service> service) {
     Service* old_service = FindServiceByName(service->name()); //查找services_中是否已存在同名service
@@ -896,6 +928,8 @@ Service* ServiceManager::FindServiceByName(const std::string& name) const {
     return nullptr;
 }
 ```
+AddService的实现比较简单，就是通过比较service的name，查看存放Service的数组services_中是否有同名的service，如果有就打印下错误日志，直接返回，
+如果不存在就加入数组中
 
 EndFile依然是一个空实现,定义在platform/system/core/init/service.h
 ```C
@@ -923,10 +957,7 @@ private:
 ### 2.4 ImportParser
 定义在platform/system/core/init/import_parser.cpp
 
-最后我们看看ImportParser，ImportParser的ParseLineSection、EndSection都是空实现，只实现了ParseSection和EndFile,
-因为它的语法比较单一，只有一行. 我们来看看它的ParseSection函数
-
-首先检查单词只能是两个，因为只能是import xxx 这种语法，然后调用expand_props处理下参数，最后将结果放入数组imports_存起来
+最后我们看看ImportParser
 ```C
 bool ImportParser::ParseSection(const std::vector<std::string>& args,
                                 std::string* err) {
@@ -947,8 +978,12 @@ bool ImportParser::ParseSection(const std::vector<std::string>& args,
     return true;
 }
 ```
+ImportParser的ParseLineSection、EndSection都是空实现，只实现了ParseSection和EndFile,
+因为它的语法比较单一，只有一行. 我们来看看它的ParseSection函数
 
-expand_props 定义在platform/system/core/init/util.cpp ，主要作用就是找到${x.y}或$x.y这种语法，将x.y取出来作为name，去属性系统中找对应的value，然后替换
+首先检查单词只能是两个，因为只能是import xxx 这种语法，然后调用expand_props处理下参数，最后将结果放入数组imports_存起来
+
+expand_props 定义在platform/system/core/init/util.cpp
 
 ```C
 bool expand_props(const std::string& src, std::string* dst) {
@@ -1032,8 +1067,8 @@ bool expand_props(const std::string& src, std::string* dst) {
     return true;
 }
 ```
+主要作用就是找到${x.y}或$x.y这种语法，将x.y取出来作为name，去属性系统中找对应的value，然后替换
 
-EndFile的实现比较简单，就是复制下ParseSection函数解析的.rc文件数组，然后遍历数组，调用最开始的ParseConfig函数解析一个完整的路径
 
 ```C
 void ImportParser::EndFile(const std::string& filename) {
@@ -1046,10 +1081,14 @@ void ImportParser::EndFile(const std::string& filename) {
     }
 }
 ```
+EndFile的实现比较简单，就是复制下ParseSection函数解析的.rc文件数组，然后遍历数组，调用最开始的ParseConfig函数解析一个完整的路径
+
 
 由此，我们将Android Init Language语法的转化过程分析完毕，其实它们核心的解析器就三个，ActionParser,ServiceParser，ImportParser.
 而这几个解析器主要是实现ParseSection、ParseLineSection、EndSection、EndFile四个函数
+
 - ParseSection用于解析Section的第一行，比如
+
 ```C
 on early
 service ueventd /sbin/ueventd
@@ -1065,7 +1104,6 @@ class core
 
 ## 三、加入一些事件和一些Action
 
-经过上一步的解析，系统从各种.rc文件中读取了需要执行的Action和Service,但是还是需要一些额外的配置，也需要加入触发条件准备去触发
 ```C
     // Turning this on and letting the INFO logging be discarded adds 0.2s to
     // Nexus 9 boot time, so it's disabled by default.
@@ -1105,10 +1143,12 @@ class core
     am.QueueBuiltinAction(queue_property_triggers_action, "queue_property_triggers");
 ```
 
+系统从各种.rc文件中读取了需要执行的Action和Service,但是还是需要一些额外的配置，也需要加入触发条件准备去触发
+
 ### 3.1 QueueEventTrigger
 定义在platform/system/core/init/action.cpp
 
-它并没有去触发trigger，而是构造了一个EventTrigger对象，放到队列中存起来
+
 ```C
 void ActionManager::QueueEventTrigger(const std::string& trigger) {
     trigger_queue_.push(std::make_unique<EventTrigger>(trigger));
@@ -1126,11 +1166,12 @@ private:
 };
 ```
 
+它并没有去触发trigger，而是构造了一个EventTrigger对象，放到队列中存起来
+
 ### 3.2 QueueBuiltinAction
 定义在platform/system/core/init/action.cpp
 
-这个函数有两个参数，第一个参数是一个函数指针，第二参数是字符串. 首先是创建一个Action对象，将第二参数作为Action触发条件，
-将第一个参数作为Action触发后的执行命令，并且又把第二个参数作为命令的参数，最后是将Action加入触发队列并加入Action列表
+
 ```C
 void ActionManager::QueueBuiltinAction(BuiltinFunction func,
                                        const std::string& name) {
@@ -1148,10 +1189,11 @@ void ActionManager::QueueBuiltinAction(BuiltinFunction func,
 }
 ```
 
+这个函数有两个参数，第一个参数是一个函数指针，第二参数是字符串. 首先是创建一个Action对象，将第二参数作为Action触发条件，
+将第一个参数作为Action触发后的执行命令，并且又把第二个参数作为命令的参数，最后是将Action加入触发队列并加入Action列表
 
 ## 四、触发所有事件并不断监听新的事件
 
-之前的所有工作都是往各种数组、队列里面存入信息，并没有真正去触发，而接下来的工作就是真正去触发这些事件，以及用epoll不断监听新的事件
 
 ```C
     while (true) {
@@ -1201,13 +1243,10 @@ void ActionManager::QueueBuiltinAction(BuiltinFunction func,
 }
 ```
 
+之前的所有工作都是往各种数组、队列里面存入信息，并没有真正去触发，而接下来的工作就是真正去触发这些事件，以及用epoll不断监听新的事件
+
 ### 4.1 ExecuteOneCommand
 定义在platform/system/core/init/action.cpp
-
-从名字可以看出，它只执行一个command，是的，只执行一个. 在函数一开始就从trigger_queue_队列中取出一个trigger，
-然后遍历所有action，找出满足trigger条件的action加入待执行列表current_executing_actions_中，
-接着从这个列表中取出一个action，执行它的第一个命令，并将命令所在下标自加1. 由于ExecuteOneCommand外部是一个无限循环，
-因此按照上面的逻辑一遍遍执行，将按照trigger表的顺序，依次执行满足trigger条件的action，然后依次执行action中的命令.
 
 
 ```C
@@ -1250,13 +1289,16 @@ void ActionManager::ExecuteOneCommand() {
         }
     }
 }
+
 ```
+
+从名字可以看出，它只执行一个command，是的，只执行一个. 在函数一开始就从trigger_queue_队列中取出一个trigger，
+然后遍历所有action，找出满足trigger条件的action加入待执行列表current_executing_actions_中，
+接着从这个列表中取出一个action，执行它的第一个命令，并将命令所在下标自加1. 由于ExecuteOneCommand外部是一个无限循环，
+因此按照上面的逻辑一遍遍执行，将按照trigger表的顺序，依次执行满足trigger条件的action，然后依次执行action中的命令.
 
 ### 4.1 restart_processes
 定义在platform/system/core/init/init.cpp
-
-restart_processes调用的其实是ForEachServiceWithFlags函数，这个函数主要是遍历services_数组，比较它们的flags是否是SVC_RESTARTING，
-也就是当前service是否是等待重启的，如果是就执行它的RestartIfNeeded函数
 
 ```C
 static void restart_processes()
@@ -1277,11 +1319,13 @@ void ServiceManager::ForEachServiceWithFlags(unsigned matchflags,
 }
 ```
 
+restart_processes调用的其实是ForEachServiceWithFlags函数，这个函数主要是遍历services_数组，比较它们的flags是否是SVC_RESTARTING，
+也就是当前service是否是等待重启的，如果是就执行它的RestartIfNeeded函数
+
 ### 4.2 RestartIfNeeded
 定义在platform/system/core/init/service.cpp
 
-这个函数将主要工作交给了Start，也就是具体的启动service，但是交给它之前做了一些判断，也就是5秒内只能启动一个服务，
-如果有多个服务，那么后续的服务将进入等待
+
 
 ```C
 void Service::RestartIfNeeded(time_t* process_needs_restart_at) {
@@ -1301,10 +1345,12 @@ void Service::RestartIfNeeded(time_t* process_needs_restart_at) {
 }
 ```
 
+这个函数将主要工作交给了Start，也就是具体的启动service，但是交给它之前做了一些判断，也就是5秒内只能启动一个服务，
+如果有多个服务，那么后续的服务将进入等待
+
 ### 4.2 Start
 定义在platform/system/core/init/service.cpp
 
-Start是具体去启动服务了，它主要是调用clone或fork创建子进程，然后调用execve执行配置的二进制文件，另外根据之前在.rc文件中的配置，去执行这些配置
 
 ```C
 bool Service::Start() {
@@ -1342,6 +1388,8 @@ bool Service::Start() {
     ... //执行service其他参数如oom_score_adjust_，改变service运行状态等
 }
 ```
+
+Start是具体去启动服务了，它主要是调用clone或fork创建子进程，然后调用execve执行配置的二进制文件，另外根据之前在.rc文件中的配置，去执行这些配置
 
 **小结**
 

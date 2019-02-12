@@ -228,7 +228,6 @@ kthreadd进程我将在第二节中重点讲，它是内核中重要的进程，
 ### 1.7 rcu_read_lock & rcu_read_unlock
 定义在msm/include/linux/rcupdate.h和msm/kernel/rcupdate.c中
 
-RCU（Read-Copy Update）是数据同步的一种方式，在当前的Linux内核中发挥着重要的作用。RCU主要针对的数据对象是链表，目的是提高遍历读取数据的效率，为了达到目的使用RCU机制读取数据的时候不对链表进行耗时的加锁操作。这样在同一时间可以有多个线程同时读取该链表，并且允许一个线程对链表进行修改（修改的时候，需要加锁）
 ```C
 static inline void rcu_read_lock(void)
 {
@@ -249,12 +248,11 @@ static inline void rcu_read_unlock(void)
 }
 ```
 
+RCU（Read-Copy Update）是数据同步的一种方式，在当前的Linux内核中发挥着重要的作用。RCU主要针对的数据对象是链表，目的是提高遍历读取数据的效率，为了达到目的使用RCU机制读取数据的时候不对链表进行耗时的加锁操作。这样在同一时间可以有多个线程同时读取该链表，并且允许一个线程对链表进行修改（修改的时候，需要加锁）
+
 ### 1.8 find_task_by_pid_ns
 定义在msm/kernel/pid.c中
 
-task_struct叫进程描述符，这个结构体包含了一个进程所需的所有信息，它定义在msm/include/linux/sched.h文件中。
-
-它的结构十分复杂，本文就不重点讲了，可以参考[Linux进程描述符task_struct结构体详解](http://blog.csdn.net/gatieme/article/details/51383272)
 ```C
 /*
  * Must be called under rcu_read_lock().
@@ -296,9 +294,17 @@ struct task_struct *pid_task(struct pid *pid, enum pid_type type)
 	return result;
 }
 ```
+
+task_struct叫进程描述符，这个结构体包含了一个进程所需的所有信息，它定义在msm/include/linux/sched.h文件中。
+
+它的结构十分复杂，本文就不重点讲了，可以参考[Linux进程描述符task_struct结构体详解](http://blog.csdn.net/gatieme/article/details/51383272)
+
 find_task_by_pid_ns的作用就是根据pid，在hash表中获得对应pid的task_struct
+
 ### 1.9 sched_setscheduler_nocheck
+
 定义在msm/kernel/sched/core.c中
+
 ```C
 int sched_setscheduler_nocheck(struct task_struct *p, int policy,
 			       const struct sched_param *param)
@@ -319,7 +325,9 @@ linux内核目前实现了6种调度策略(即调度算法), 用于对不同类�
 - SCHED_IDLE则在系统空闲时调用idle进程，优先级最低
 
 ### 1.10 init_idle_bootup_task
+
 定义在msm/kernel/sched/core.c中
+
 ```C
 void __cpuinit init_idle_bootup_task(struct task_struct *idle)
 {
@@ -335,7 +343,9 @@ stop_sched_class -> dl_sched_class -> rt_sched_class -> fair_sched_class -> idle
 可见idle_sched_class的优先级最低，只有系统空闲时才调用idle进程
 
 ### 1.11 schedule_preempt_disabled
+
 定义在msm/kernel/sched/core.c中
+
 ```C
 /**
  * schedule_preempt_disabled - called with preemption disabled
@@ -353,7 +363,9 @@ void __sched schedule_preempt_disabled(void)
 1.9到1.11都涉及到Linux的进程调度问题，可以参考 [Linux用户抢占和内核抢占详解](http://blog.csdn.net/gatieme/article/details/51872618)
 
 ### 1.12 cpu_startup_entry
+
 定义在msm/kernel/cpu/idle.c中
+
 ```C
 void cpu_startup_entry(enum cpuhp_state state)
 {
@@ -386,8 +398,11 @@ void cpu_startup_entry(enum cpuhp_state state)
 }
 
 ```
+
 ### 1.13 cpu_idle_loop
+
 定义在msm/kernel/cpu/idle.c中
+
 ```C
 /*
  * Generic idle loop implementation
@@ -456,7 +471,9 @@ pid = kernel_thread(kthreadd, NULL, CLONE_FS | CLONE_FILES);
 进程创建成功后会执行kthreadd函数
 
 ### 2.1 kthreadd
+
 定义在msm/kernel/kthread.c中
+
 ```C
 int kthreadd(void *unused)
 {
@@ -498,9 +515,13 @@ int kthreadd(void *unused)
 	return 0;
 }
 ```
+
 kthreadd函数的作用就是循环地从kthread_create_list链表中取出要创建的线程，然后执行create_kthread函数，直到kthread_create_list为空，让出CPU,进入睡眠，我们来看下create_kthread函数
+
 ### 2.2 create_kthread
+
 定义在msm/kernel/kthread.c中
+
 ```C
 static void create_kthread(struct kthread_create_info *create)
 {
@@ -520,7 +541,9 @@ static void create_kthread(struct kthread_create_info *create)
 其实这里面就是调用kernel_thread函数创建进程，然后执行kthread函数，注意不要搞混了，之前那个函数叫kthreadd，接下来看看kthread函数
 
 ### 2.3 kthread
+
 定义在msm/kernel/kthread.c中
+
 ```C
 static int kthread(void *_create)
 {
@@ -555,9 +578,8 @@ static int kthread(void *_create)
 ```
 
 ### 2.4 kthread_create & kthread_run
-定义在msm/include/linux/kthread.h
 
-kthreadd创建线程是遍历kthread_create_list列表，那kthread_create_list列表中的值是哪儿来的呢？我们知道Linux创建内核线程有两种方式，kthread_create和kthread_run
+定义在msm/include/linux/kthread.h
 
 ```C
 #define kthread_create(threadfn, data, namefmt, arg...) \
@@ -572,6 +594,8 @@ kthreadd创建线程是遍历kthread_create_list列表，那kthread_create_list�
 	__k;								   \
 })
 ```
+kthreadd创建线程是遍历kthread_create_list列表，那kthread_create_list列表中的值是哪儿来的呢？我们知道Linux创建内核线程有两种方式，kthread_create和kthread_run
+
 kthread_create和kthread_run并不是函数，而是宏，宏相当于Java中的final static定义，在编译时会替换对应代码，宏的参数没有类型定义，多行宏的定义会在行末尾加上\
 
 这两个宏最终都是调用kthread_create_on_node函数，只是kthread_run在线程创建完成后会手动唤醒，我们来看看kthread_create_on_node函数
@@ -671,7 +695,9 @@ kernel_thread(kernel_init, NULL, CLONE_FS | CLONE_SIGHAND);
 在创建完init进程后，会调用kernel_init函数
 
 ### 3.1 kernel_init
+
 定义在msm/init/main.c中
+
 ```C
 /*
  * __ref 这个跟之前讲的__init作用一样
@@ -827,7 +853,9 @@ static void __init do_basic_setup(void)
 ```
 
 ### 3.4 driver_init
+
 定义在msm/drivers/base/init.c中
+
 ```C
 /**
  * driver_init - initialize driver model.
@@ -856,11 +884,13 @@ void __init driver_init(void)
 }
 
 ```
+
 这个函数完成驱动子系统的构建，实现了Linux设备驱动的一个整体框架，但是它只是建立了目录结构，具体驱动的装载是在do_initcalls函数，之前有讲
 
 kernel_init_freeable函数告一段落了，我们接着讲kernel_init中剩余的函数
 
 ### 3.5 free_initmem
+
 定义在msm/arch/arm64/mm/init.c中中
 
 ```C
@@ -874,7 +904,9 @@ void free_initmem(void)
 所有使用__init标记过的函数和使用__initdata标记过的数据，在free_initmem函数执行后，都不能使用，它们曾经获得的内存现在可以重新用于其他目的。
 
 ### 3.6 flush_delayed_fput
+
 定义在msm/arch/arm64/mm/init.c中,它执行的是delayed_fput(NULL)
+
 ```C
 static void delayed_fput(struct work_struct *unused)
 {
@@ -892,7 +924,9 @@ static void delayed_fput(struct work_struct *unused)
 这个函数主要用于释放&delayed_fput_list这个链表中的struct file，struct file即文件结构体，代表一个打开的文件，系统中的每个打开的文件在内核空间都有一个关联的 struct file。
 
 ### 3.7 run_init_process
+
 定义在msm/init/main.c中
+
 ```C
 static int run_init_process(const char *init_filename)
 {

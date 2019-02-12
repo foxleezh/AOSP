@@ -663,7 +663,6 @@ static selabel_initfunc initfuncs[] = {
 ### 2.3 selinux_restore_context
 定义在 platform/system/core/init/init.cpp
 
-主要就是恢复这些文件的安全上下文，因为这些文件是在SELinux安全机制初始化前创建，所以需要重新恢复下安全性
 
 ```C
 static void selinux_restore_context() {
@@ -695,6 +694,8 @@ static void selinux_restore_context() {
 }
 ```
 
+主要就是恢复这些文件的安全上下文，因为这些文件是在SELinux安全机制初始化前创建，所以需要重新恢复下安全性
+
 ## 三、新建epoll并初始化子进程终止信号处理函数
 
 ```C
@@ -721,28 +722,6 @@ EPOLL_CLOEXEC这个参数是为文件描述符添加O_CLOEXEC属性，参考http
 ### 3.2 signal_handler_init
 定义在platform/system/core/init/signal_handler.cpp
 
-这个函数主要的作用是注册SIGCHLD信号的处理函数
-
-init是一个守护进程，为了防止init的子进程成为僵尸进程(zombie process)，
-需要init在子进程在结束时获取子进程的结束码，通过结束码将程序表中的子进程移除，
-防止成为僵尸进程的子进程占用程序表的空间（程序表的空间达到上限时，系统就不能再启动新的进程了，会引起严重的系统问题）
-
-在linux当中，父进程是通过捕捉SIGCHLD信号来得知子进程运行结束的情况，SIGCHLD信号会在子进程终止的时候发出，了解这些背景后，我们来看看init进程如何处理这个信号
-
-首先，调用socketpair,这个方法会返回一对文件描述符，这样当一端写入时，另一端就能被通知到，
-socketpair两端既可以写也可以读，这里只是单向的让s[0]写，s[1]读
-
-然后，新建一个sigaction结构体，sa_handler是信号处理函数，指向SIGCHLD_handler，
-SIGCHLD_handler做的事情就是往s[0]里写个"1"，这样s[1](signal_read_fd)就会收到通知，SA_NOCLDSTOP表示只在子进程终止时处理，
-因为子进程在暂停时也会发出SIGCHLD信号
-
-sigaction(SIGCHLD, &act, 0) 这个是建立信号绑定关系，也就是说当监听到SIGCHLD信号时，由act这个sigaction结构体处理
-
-ReapAnyOutstandingChildren 这个后文讲
-
-最后，register_epoll_handler的作用就是注册一个监听，当signal_read_fd（之前的s[1]）收到信号，触发handle_signal
-
-终上所述，signal_handler_init函数的作用就是，接收到SIGCHLD信号时触发handle_signal
 
 ```C
 void signal_handler_init() {
@@ -779,11 +758,32 @@ void register_epoll_handler(int fd, void (*fn)()) {
 }
 ```
 
+这个函数主要的作用是注册SIGCHLD信号的处理函数
+
+init是一个守护进程，为了防止init的子进程成为僵尸进程(zombie process)，
+需要init在子进程在结束时获取子进程的结束码，通过结束码将程序表中的子进程移除，
+防止成为僵尸进程的子进程占用程序表的空间（程序表的空间达到上限时，系统就不能再启动新的进程了，会引起严重的系统问题）
+
+在linux当中，父进程是通过捕捉SIGCHLD信号来得知子进程运行结束的情况，SIGCHLD信号会在子进程终止的时候发出，了解这些背景后，我们来看看init进程如何处理这个信号
+
+首先，调用socketpair,这个方法会返回一对文件描述符，这样当一端写入时，另一端就能被通知到，
+socketpair两端既可以写也可以读，这里只是单向的让s[0]写，s[1]读
+
+然后，新建一个sigaction结构体，sa_handler是信号处理函数，指向SIGCHLD_handler，
+SIGCHLD_handler做的事情就是往s[0]里写个"1"，这样s[1](signal_read_fd)就会收到通知，SA_NOCLDSTOP表示只在子进程终止时处理，
+因为子进程在暂停时也会发出SIGCHLD信号
+
+sigaction(SIGCHLD, &act, 0) 这个是建立信号绑定关系，也就是说当监听到SIGCHLD信号时，由act这个sigaction结构体处理
+
+ReapAnyOutstandingChildren 这个后文讲
+
+最后，register_epoll_handler的作用就是注册一个监听，当signal_read_fd（之前的s[1]）收到信号，触发handle_signal
+
+终上所述，signal_handler_init函数的作用就是，接收到SIGCHLD信号时触发handle_signal
+
 ### 3.3 handle_signal
 定义在platform/system/core/init/signal_handler.cpp
 
-首先清空signal_read_fd中的数据，然后调用ReapAnyOutstandingChildren，之前在signal_handler_init中调用过一次，
-它其实是调用ReapOneProcess
 
 ```C
 static void handle_signal() {
@@ -795,10 +795,11 @@ static void handle_signal() {
 }
 ```
 
+首先清空signal_read_fd中的数据，然后调用ReapAnyOutstandingChildren，之前在signal_handler_init中调用过一次，
+它其实是调用ReapOneProcess
+
 ### 3.4 ReapOneProcess
 定义在platform/system/core/init/service.cpp
-
-这是最终的处理函数了，这个函数先用waitpid找出挂掉进程的pid,然后根据pid找到对应Service，最后调用Service的Reap方法清除资源,根据进程对应的类型，决定是否重启机器或重启进程
 
 ```C
 bool ServiceManager::ReapOneProcess() {
@@ -856,6 +857,9 @@ bool ServiceManager::ReapOneProcess() {
 }
 ```
 
+这是最终的处理函数了，这个函数先用waitpid找出挂掉进程的pid,然后根据pid找到对应Service，
+最后调用Service的Reap方法清除资源,根据进程对应的类型，决定是否重启机器或重启进程
+
 ## 四、设置其他系统属性并开启系统属性服务
 
 ```C
@@ -868,7 +872,6 @@ bool ServiceManager::ReapOneProcess() {
 
 ### 4.1 设置其他系统属性
 
-property_load_boot_defaults，export_oem_lock_status，set_usb_controller这三个函数都是调用property_set设置一些系统属性
 
 ```C
 void property_load_boot_defaults() {
@@ -910,15 +913,10 @@ static void set_usb_controller() {
     }
 }
 ```
+property_load_boot_defaults，export_oem_lock_status，set_usb_controller这三个函数都是调用property_set设置一些系统属性
 
 ### 4.2 start_property_service
 定义在platform/system/core/init/property_service.cpp
-
-之前我们看到通过property_set可以轻松设置系统属性，那干嘛这里还要启动一个属性服务呢？这里其实涉及到一些权限的问题，不是所有进程都可以随意修改任何的系统属性，
-Android将属性的设置统一交由init进程管理，其他进程不能直接修改属性，而只能通知init进程来修改，而在这过程中，init进程可以进行权限控制，我们来看看这些是如何实现的
-
-首先创建一个socket并返回文件描述符，然后设置最大并发数为8，其他进程可以通过这个socket通知init进程修改系统属性，
-最后注册epoll事件，也就是当监听到property_set_fd改变时调用handle_property_set_fd
 
 
 ```C
@@ -939,10 +937,16 @@ void start_property_service() {
 
 ```
 
+之前我们看到通过property_set可以轻松设置系统属性，那干嘛这里还要启动一个属性服务呢？这里其实涉及到一些权限的问题，不是所有进程都可以随意修改任何的系统属性，
+Android将属性的设置统一交由init进程管理，其他进程不能直接修改属性，而只能通知init进程来修改，而在这过程中，init进程可以进行权限控制，我们来看看这些是如何实现的
+
+首先创建一个socket并返回文件描述符，然后设置最大并发数为8，其他进程可以通过这个socket通知init进程修改系统属性，
+最后注册epoll事件，也就是当监听到property_set_fd改变时调用handle_property_set_fd
+
 ### 4.3 handle_property_set_fd
 定义在platform/system/core/init/property_service.cpp
 
-这个函数主要作用是建立socket连接，然后从socket中读取操作信息，根据不同的操作类型，调用handle_property_set做具体的操作
+
 
 ```C
 static void handle_property_set_fd() {
@@ -1011,11 +1015,12 @@ static void handle_property_set_fd() {
 }
 ```
 
+这个函数主要作用是建立socket连接，然后从socket中读取操作信息，根据不同的操作类型，调用handle_property_set做具体的操作
+
 ### 4.4 handle_property_set
 定义在platform/system/core/init/property_service.cpp
 
-这就是最终的处理函数，以"ctl."开头的key就做一些Service的Start,Stop,Restart操作，其他的就是调用property_set进行属性设置，
-不管是前者还是后者，都要进行SELinux安全性检查，只有该进程有操作权限才能执行相应操作
+
 
 ```C
 static void handle_property_set(SocketConnection& socket,
@@ -1067,6 +1072,8 @@ static void handle_property_set(SocketConnection& socket,
 }
 ```
 
+这就是最终的处理函数，以"ctl."开头的key就做一些Service的Start,Stop,Restart操作，其他的就是调用property_set进行属性设置，
+不管是前者还是后者，都要进行SELinux安全性检查，只有该进程有操作权限才能执行相应操作
 
 **小结**
 

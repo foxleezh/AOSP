@@ -122,8 +122,7 @@ late-init 在哪儿触发的呢？其实上一篇中有讲到，在init进程的
 
 上一篇中我们知道 start 命令有一个对应的执行函数 do_start ,定义在platform/system/core/init/builtins.cpp中
 
-do_start首先是通过FindServiceByName去service数组中遍历，根据名字匹配出对应的service,然后调用service的Start函数，
-Start函数我们在上一篇结尾有分析，主要是fork出一个新进程然后执行service对应的二进制文件，并将参数传递进去.
+
 ```C
 static const Map builtin_functions = {
         ...
@@ -145,6 +144,8 @@ static int do_start(const std::vector<std::string>& args) {
 }
 
 ```
+do_start首先是通过FindServiceByName去service数组中遍历，根据名字匹配出对应的service,然后调用service的Start函数，
+Start函数我们在上一篇结尾有分析，主要是fork出一个新进程然后执行service对应的二进制文件，并将参数传递进去.
 
 zygote对应的二进制文件是 /system/bin/app_process64 （以此为例），我们看一下对应的mk文件，
 对应的目录在platform/frameworks/base/cmds/app_process/Android.mk,
@@ -175,13 +176,7 @@ LOCAL_MODULE_STEM_64 := app_process64
 ## 二、zygote参数解析
 platform/frameworks/base/cmds/app_process/app_main.cpp
 
-在app_main.cpp的main函数中，主要做的事情就是参数解析. 这个函数有两种启动模式：
-- 一种是zygote模式，也就是初始化zygote进程，传递的参数有--start-system-server --socket-name=zygote，前者表示启动SystemServer，后者指定socket的名称
-- 一种是application模式，也就是启动普通应用程序，传递的参数有class名字以及class带的参数
 
-两者最终都是调用AppRuntime对象的start函数，加载ZygoteInit或RuntimeInit两个Java类，并将之前整理的参数传入进去
-
-由于本篇讲的是zygote进程启动流程，因此接下来我只讲解ZygoteInit的加载.
 
 ```C
 int main(int argc, char* const argv[])
@@ -357,6 +352,14 @@ int main(int argc, char* const argv[])
 }
 ```
 
+在app_main.cpp的main函数中，主要做的事情就是参数解析. 这个函数有两种启动模式：
+- 一种是zygote模式，也就是初始化zygote进程，传递的参数有--start-system-server --socket-name=zygote，前者表示启动SystemServer，后者指定socket的名称
+- 一种是application模式，也就是启动普通应用程序，传递的参数有class名字以及class带的参数
+
+两者最终都是调用AppRuntime对象的start函数，加载ZygoteInit或RuntimeInit两个Java类，并将之前整理的参数传入进去
+
+由于本篇讲的是zygote进程启动流程，因此接下来我只讲解ZygoteInit的加载.
+
 我们看到，在最后调用的是runtime.start函数，这个就是要启动虚拟机了，接下来我们分析start函数
 
 ## 三、创建虚拟机
@@ -366,7 +369,7 @@ int main(int argc, char* const argv[])
 ### 3.1 创建虚拟机、注册JNI函数
 platform/frameworks/base/core/jni/AndroidRuntime.cpp
 
-前半部分主要是初始化JNI，然后创建虚拟机，注册一些JNI函数，我将分开一个个单独讲
+
 
 ```C
 
@@ -395,13 +398,12 @@ void AndroidRuntime::start(const char* className, const Vector<String8>& options
     ... //JNI方式调用ZygoteInit类的main函数
 }
 ```
+前半部分主要是初始化JNI，然后创建虚拟机，注册一些JNI函数，我将分开一个个单独讲
 
 #### 3.1.1 JniInvocation.Init
 定义在platform/libnativehelper/JniInvocation.cpp
 
-Init函数主要作用是初始化JNI，具体工作是首先通过dlopen加载libart.so获得其句柄，然后调用dlsym从libart.so中找到
-JNI_GetDefaultJavaVMInitArgs、JNI_CreateJavaVM、JNI_GetCreatedJavaVMs三个函数地址，赋值给对应成员属性，
-这三个函数会在后续虚拟机创建中调用.
+
 
 ```C
 bool JniInvocation::Init(const char* library) {
@@ -464,11 +466,13 @@ bool JniInvocation::Init(const char* library) {
 }
 ```
 
+Init函数主要作用是初始化JNI，具体工作是首先通过dlopen加载libart.so获得其句柄，然后调用dlsym从libart.so中找到
+JNI_GetDefaultJavaVMInitArgs、JNI_CreateJavaVM、JNI_GetCreatedJavaVMs三个函数地址，赋值给对应成员属性，
+这三个函数会在后续虚拟机创建中调用.
+
 #### 3.1.2 startVm
 定义在platform/frameworks/base/core/jni/AndroidRuntime.cpp
 
-这个函数特别长，但是里面做的事情很单一，其实就是从各种系统属性中读取一些参数，然后通过addOption设置到AndroidRuntime的mOptions数组中存起来，
-另外就是调用之前从libart.so中找到JNI_CreateJavaVM函数，并将这些参数传入，由于本篇主要讲zygote启动流程，因此关于虚拟机的实现就不深入探究了
 ```C
 int AndroidRuntime::startVm(JavaVM** pJavaVM, JNIEnv** pEnv, bool zygote)
 {
@@ -496,12 +500,13 @@ jint JniInvocation::JNI_CreateJavaVM(JavaVM** p_vm, JNIEnv** p_env, void* vm_arg
 }
 ```
 
+这个函数特别长，但是里面做的事情很单一，其实就是从各种系统属性中读取一些参数，然后通过addOption设置到AndroidRuntime的mOptions数组中存起来，
+另外就是调用之前从libart.so中找到JNI_CreateJavaVM函数，并将这些参数传入，由于本篇主要讲zygote启动流程，因此关于虚拟机的实现就不深入探究了
 
 #### 3.1.3 startReg
 定义在platform/frameworks/base/core/jni/AndroidRuntime.cpp
 
-startReg首先是设置了Android创建线程的处理函数，然后创建了一个200容量的局部引用作用域，用于确保不会出现OutOfMemoryException，
-最后就是调用register_jni_procs进行JNI注册
+
 
 ```C
 int AndroidRuntime::startReg(JNIEnv* env)
@@ -537,10 +542,13 @@ int AndroidRuntime::startReg(JNIEnv* env)
 }
 ```
 
+startReg首先是设置了Android创建线程的处理函数，然后创建了一个200容量的局部引用作用域，用于确保不会出现OutOfMemoryException，
+最后就是调用register_jni_procs进行JNI注册
+
 #### 3.1.4 register_jni_procs
 定义在platform/frameworks/base/core/jni/AndroidRuntime.cpp
 
-它的处理是交给RegJNIRec的mProc,RegJNIRec是个很简单的结构体，mProc是个函数指针
+
 ```C
 static int register_jni_procs(const RegJNIRec array[], size_t count, JNIEnv* env)
 {
@@ -560,8 +568,10 @@ struct RegJNIRec {
 };
 
 ```
+它的处理是交给RegJNIRec的mProc,RegJNIRec是个很简单的结构体，mProc是个函数指针
 
 我们看看register_jni_procs传入的RegJNIRec数组gRegJNI,里面就是一堆的函数指针
+
 ```C
 static const RegJNIRec gRegJNI[] = {
     REG_JNI(register_com_android_internal_os_RuntimeInit),

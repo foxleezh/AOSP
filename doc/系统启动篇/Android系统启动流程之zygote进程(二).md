@@ -10,9 +10,6 @@
 platform/frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
 ```
 
-main函数最开始new了一个ZygoteServer，这个后续会用到，然后设置标记，不允许新建线程，为什么不允许多线程呢？
-这主要是担心用户创建app时，多线程情况下某些预先加载的资源没加载好，这时去调用会出问题. 接着设置了zygote进程的进程组id，
-最后便是一系列性能统计相关的动作
 
 ```java
 public static void main(String argv[]) {
@@ -49,6 +46,10 @@ public static void main(String argv[]) {
 }
 
 ```
+
+main函数最开始new了一个ZygoteServer，这个后续会用到，然后设置标记，不允许新建线程，为什么不允许多线程呢？
+这主要是担心用户创建app时，多线程情况下某些预先加载的资源没加载好，这时去调用会出问题. 接着设置了zygote进程的进程组id，
+最后便是一系列性能统计相关的动作
 
 #### 1.1 性能统计
 

@@ -356,7 +356,6 @@ start函数最后就用到了ExceptionCheck，因为调用Java的方法是可能
 
 ### 2.1 main函数
 
-main函数开头有两个方法调用 startZygoteNoThreadCreation和setpgid，这两个其实都是native方法，接下来我就以这两个为例子。
 
 ```java
 public static void main(String argv[]) {
@@ -376,6 +375,8 @@ public static void main(String argv[]) {
 }
 
 ```
+main函数开头有两个方法调用 startZygoteNoThreadCreation和setpgid，这两个其实都是native方法，接下来我就以这两个为例子。
+
 
 startZygoteNoThreadCreation 定义在platform/libcore/dalvik/src/main/java/dalvik/system/ZygoteHooks中
 
@@ -473,9 +474,7 @@ REGISTER_NATIVE_METHODS
 }
 ```
 其实它调用的是jniRegisterNativeMethods，这个定义在platform/libnativehelper/JNIHelp.cpp，
-jniRegisterNativeMethods函数首先是将传过来的类名字符串找到对应的class，然后就是调用(*env)->RegisterNatives动态注册JNI，
-其实调用这么多层，动态注册最关键的就是构建一个结构体JNINativeMethod，然后调用(*env)->RegisterNatives，RegisterNatives属于
-虚拟机内的函数了，今后讲虚拟机时我再具体去分析，这里我们知道它的作用就行了.
+
 ```C
 extern "C" int jniRegisterNativeMethods(C_JNIEnv* env, const char* className,
     const JNINativeMethod* gMethods, int numMethods)
@@ -514,6 +513,10 @@ extern "C" int jniRegisterNativeMethods(C_JNIEnv* env, const char* className,
     return 0;
 }
 ```
+jniRegisterNativeMethods函数首先是将传过来的类名字符串找到对应的class，然后就是调用(*env)->RegisterNatives动态注册JNI，
+其实调用这么多层，动态注册最关键的就是构建一个结构体JNINativeMethod，然后调用(*env)->RegisterNatives，RegisterNatives属于
+虚拟机内的函数了，今后讲虚拟机时我再具体去分析，这里我们知道它的作用就行了.
+
 
 我们接着上面的startZygoteNoThreadCreation函数讲，由上可知这个native函数实际会调用ZygoteHooks_startZygoteNoThreadCreation,
 它定义在platform/art/runtime/native/dalvik_system_ZygoteHooks.cc
@@ -523,8 +526,7 @@ static void ZygoteHooks_startZygoteNoThreadCreation(JNIEnv* env ATTRIBUTE_UNUSED
   Runtime::Current()->SetZygoteNoThreadSection(true);
 }
 ```
-其实它又是调用Runtime的SetZygoteNoThreadSection函数，这个定义在platform/art/runtime/runtime.h,这个函数的实现非常简单，
-就是将zygote_no_threads_这个bool值设置为想要的值
+其实它又是调用Runtime的SetZygoteNoThreadSection函数，这个定义在platform/art/runtime/runtime.h
 ```C
 static Runtime* instance_;
 
@@ -540,6 +542,7 @@ void SetZygoteNoThreadSection(bool val) {
 }
 
 ```
+这个函数的实现非常简单，就是将zygote_no_threads_这个bool值设置为想要的值
 
 由此我们可以看到startZygoteNoThreadCreation这个native函数经过层层调用，最终就是将一个bool变量设置为true. 讲得是有点多了，
 这里主要是告诉大家如何去追踪native函数的实现，因为这是阅读frameworks层代码必备的技能. 这里我还是再次推荐大家用Source Insight
@@ -548,8 +551,6 @@ void SetZygoteNoThreadSection(bool val) {
 #### 4.1.2 setpgid
 定义在platform/libcore/luni/src/main/java/android/system/Os.java
 
-这个Os.java类是比较特殊的一个类，这个类相当于一个代理类，所有的方法都是去调用Libcore.os类中相关的方法，
-
 ```java
  /**
    * See <a href="http://man7.org/linux/man-pages/man2/setpgid.2.html">setpgid(2)</a>.
@@ -557,9 +558,10 @@ void SetZygoteNoThreadSection(bool val) {
   /** @hide */ public static void setpgid(int pid, int pgid) throws ErrnoException { Libcore.os.setpgid(pid, pgid); }
 
 ```
-而Libcore.os的实现类是BlockGuardOs，BlockGuardOs的父类是ForwardingOs，ForwardingOs也是个代理类，里面所有方法都是调用
-Linux.java中的对应函数，也就是说Os.java中的函数最终调用的是Linux.java中的函数. 另外在BlockGuardOs类中有重载一些方法，做了一些
-Policy权限的检查.
+
+这个Os.java类是比较特殊的一个类，这个类相当于一个代理类，所有的方法都是去调用Libcore.os类中相关的方法，
+
+
 ```java
 public final class Libcore {
     private Libcore() { }
@@ -578,6 +580,11 @@ public final class Libcore {
 }
  
 ```
+
+而Libcore.os的实现类是BlockGuardOs，BlockGuardOs的父类是ForwardingOs，ForwardingOs也是个代理类，里面所有方法都是调用
+Linux.java中的对应函数，也就是说Os.java中的函数最终调用的是Linux.java中的函数. 另外在BlockGuardOs类中有重载一些方法，做了一些
+Policy权限的检查.
+
 我们再来看看Linux.java的实现是怎样的
 ```java
 public final class Linux implements Os {
@@ -588,6 +595,7 @@ public final class Linux implements Os {
     ...
 }
 ```
+
 没错，这里面全是native函数，这些native的实现又在哪儿呢？老方法，找libcore_io_Linux，果然又找到了libcore_io_Linux.cpp
 
 ```C

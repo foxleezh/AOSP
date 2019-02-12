@@ -67,14 +67,6 @@ int main(int argc, char** argv) {
 ### 1.1 ueventd_main
 定义在platform/system/core/init/ueventd.cpp
 
-Android根文件系统的映像中不存在“/dev”目录，该目录是init进程启动后动态创建的。
-
-因此，建立Android中设备节点文件的重任，也落在了init进程身上。为此，init进程创建子进程ueventd，并将创建设备节点文件的工作托付给ueventd。
-ueventd通过两种方式创建设备节点文件。
-
-第一种方式对应“冷插拔”（Cold Plug），即以预先定义的设备信息为基础，当ueventd启动后，统一创建设备节点文件。这一类设备节点文件也被称为静态节点文件。
-
-第二种方式对应“热插拔”（Hot Plug），即在系统运行中，当有设备插入USB端口时，ueventd就会接收到这一事件，为插入的设备动态创建设备节点文件。这一类设备节点文件也被称为动态节点文件。
 
 ```C
 int ueventd_main(int argc, char **argv)
@@ -137,15 +129,19 @@ int ueventd_main(int argc, char **argv)
 
 ```
 
+Android根文件系统的映像中不存在“/dev”目录，该目录是init进程启动后动态创建的。
+
+因此，建立Android中设备节点文件的重任，也落在了init进程身上。为此，init进程创建子进程ueventd，并将创建设备节点文件的工作托付给ueventd。
+ueventd通过两种方式创建设备节点文件。
+
+第一种方式对应“冷插拔”（Cold Plug），即以预先定义的设备信息为基础，当ueventd启动后，统一创建设备节点文件。这一类设备节点文件也被称为静态节点文件。
+
+第二种方式对应“热插拔”（Hot Plug），即在系统运行中，当有设备插入USB端口时，ueventd就会接收到这一事件，为插入的设备动态创建设备节点文件。这一类设备节点文件也被称为动态节点文件。
+
+
 ### 1.2 watchdogd_main
 定义在platform/system/core/init/watchdogd.cpp
 
-"看门狗"本身是一个定时器电路，内部会不断的进行计时（或计数）操作,计算机系统和"看门狗"有两个引脚相连接，
-正常运行时每隔一段时间就会通过其中一个引脚向"看门狗"发送信号，"看门狗"接收到信号后会将计时器清零并重新开始计时,
-而一旦系统出现问题，进入死循环或任何阻塞状态，不能及时发送信号让"看门狗"的计时器清零，当计时结束时，
-"看门狗"就会通过另一个引脚向系统发送“复位信号”，让系统重启
-
-watchdogd_main主要是定时器作用,而DEV_NAME就是那个引脚
 
 ```C
 int watchdogd_main(int argc, char **argv) {
@@ -197,10 +193,17 @@ int watchdogd_main(int argc, char **argv) {
     }
 }
 ```
+
+"看门狗"本身是一个定时器电路，内部会不断的进行计时（或计数）操作,计算机系统和"看门狗"有两个引脚相连接，
+正常运行时每隔一段时间就会通过其中一个引脚向"看门狗"发送信号，"看门狗"接收到信号后会将计时器清零并重新开始计时,
+而一旦系统出现问题，进入死循环或任何阻塞状态，不能及时发送信号让"看门狗"的计时器清零，当计时结束时，
+"看门狗"就会通过另一个引脚向系统发送“复位信号”，让系统重启
+
+watchdogd_main主要是定时器作用,而DEV_NAME就是那个引脚
+
 ### 1.3 install_reboot_signal_handlers
 定义在platform/system/core/init/init.cpp
 
-这个函数主要作用将各种信号量，如SIGABRT,SIGBUS等的行为设置为SA_RESTART,一旦监听到这些信号即执行重启系统
 
 ```C
 static void install_reboot_signal_handlers() {
@@ -229,10 +232,12 @@ static void install_reboot_signal_handlers() {
 }
 ```
 
+这个函数主要作用将各种信号量，如SIGABRT,SIGBUS等的行为设置为SA_RESTART,一旦监听到这些信号即执行重启系统
+
+
 ### 1.4 add_environment
 定义在platform/system/core/init/init.cpp
 
-这个函数主要作用是将一个键值对放到一个Char数组中,如果数组中有key就替换,没有就插入,跟Java中的Map差不多
 
 ```C
 /* add_environment - add "key=value" to the current environment */
@@ -270,6 +275,9 @@ int add_environment(const char *key, const char *val)
     return -1;
 }
 ```
+
+这个函数主要作用是将一个键值对放到一个Char数组中,如果数组中有key就替换,没有就插入,跟Java中的Map差不多
+
 
 ### 二、 挂载文件系统并创建目录
 
@@ -452,7 +460,7 @@ if (is_first_stage) {
 ### 3.1 InitKernelLogging
 定义在platform/system/core/init/log.cpp
 
-InitKernelLogging首先是将标准输入输出重定向到"/sys/fs/selinux/null"，然后调用InitLogging初始化log日志系统
+
 
 ```C
 void InitKernelLogging(char* argv[]) {
@@ -476,10 +484,13 @@ void InitKernelLogging(char* argv[]) {
     android::base::InitLogging(argv, &android::base::KernelLogger);//初始化log
 }
 ```
+
+InitKernelLogging首先是将标准输入输出重定向到"/sys/fs/selinux/null"，然后调用InitLogging初始化log日志系统
+
 ### 3.2 InitLogging
 定义在platform/system/core/base/logging.cpp
 
-InitLogging主要工作是设置logger和aborter的处理函数，然后设置日志系统输出等级
+
 
 ```C
 void InitLogging(char* argv[], LogFunction&& logger, AbortFunction&& aborter) {
@@ -547,6 +558,8 @@ void InitLogging(char* argv[], LogFunction&& logger, AbortFunction&& aborter) {
 }
 ```
 
+InitLogging主要工作是设置logger和aborter的处理函数，然后设置日志系统输出等级
+
 ### 3.3 KernelLogger
 定义在platform/system/core/base/logging.cpp
 
@@ -603,7 +616,6 @@ void KernelLogger(android::base::LogId, android::base::LogSeverity severity,
 ### 3.3 DoFirstStageMount
 定义在platform/system/core/init/init_first_stage.cpp
 
-主要作用是初始化特定设备并挂载
 
 ```C
 bool DoFirstStageMount() {
@@ -628,11 +640,12 @@ bool DoFirstStageMount() {
 } 
 ```
 
+主要作用是初始化特定设备并挂载
+
 ### 3.4 handle->DoFirstStageMount
 
 定义在platform/system/core/init/init_first_stage.cpp
 
-这里主要作用是去解析/proc/device-tree/firmware/android/fstab,然后得到"/system", "/vendor", "/odm"三个目录的挂载信息
 
 ```C
 FirstStageMount::FirstStageMount()
@@ -651,11 +664,11 @@ FirstStageMount::FirstStageMount()
 } 
 ```
 
+这里主要作用是去解析/proc/device-tree/firmware/android/fstab,然后得到"/system", "/vendor", "/odm"三个目录的挂载信息
+
+
 ## 四、启用SELinux安全策略
 
-SELinux是「Security-Enhanced Linux」的简称，是美国国家安全局「NSA=The National Security Agency」
-和SCC（Secure Computing Corporation）开发的 Linux的一个扩张强制访问控制安全模块。
-在这种访问控制体系的限制下，进程只能访问那些在他的任务中所需要文件
 
 ```C
 if (is_first_stage) {
@@ -687,6 +700,10 @@ if (is_first_stage) {
         ...
     }
 ```
+
+SELinux是「Security-Enhanced Linux」的简称，是美国国家安全局「NSA=The National Security Agency」
+和SCC（Secure Computing Corporation）开发的 Linux的一个扩张强制访问控制安全模块。
+在这种访问控制体系的限制下，进程只能访问那些在他的任务中所需要文件
 
 ### 4.1 selinux_initialize
 定义在platform/system/core/init/init.cpp
@@ -732,7 +749,6 @@ static void selinux_initialize(bool in_kernel_domain) {
 
 定义在platform/external/selinux/libselinux/src/callbacks.c
 
-主要就是根据不同的type设置回调函数,selinux_log,selinux_audit这些都是函数指针
 
 ```C
 void selinux_set_callback(int type, union selinux_callback cb)
@@ -756,12 +772,14 @@ void selinux_set_callback(int type, union selinux_callback cb)
 	}
 } 
 ```
+
+主要就是根据不同的type设置回调函数,selinux_log,selinux_audit这些都是函数指针
+
 ### 4.3 selinux_load_policy
 
 定义在platform/system/core/init/init.cpp
 
-这里区分了两种情况,这两种情况只是区分从哪里加载安全策略文件,第一个是从 /vendor/etc/selinux/precompiled_sepolicy  读取
-,第二个是从 /sepolicy 读取,他们最终都是调用selinux_android_load_policy_from_fd方法
+
 
 ```C
 static bool selinux_load_policy() {
@@ -769,10 +787,13 @@ static bool selinux_load_policy() {
                                             : selinux_load_monolithic_policy();
 } 
 ```
+
+这里区分了两种情况,这两种情况只是区分从哪里加载安全策略文件,第一个是从 /vendor/etc/selinux/precompiled_sepolicy  读取
+,第二个是从 /sepolicy 读取,他们最终都是调用selinux_android_load_policy_from_fd方法
+
 ### 4.4 selinux_android_load_policy_from_fd
 定义在platform/external/selinux/libselinux/src/android/android.c
 
-这个函数主要作用是设置selinux_mnt 的值为/sys/fs/selinux ,然后调用security_load_policy
 
 ```C
 int selinux_android_load_policy_from_fd(int fd, const char *description)
@@ -824,11 +845,12 @@ int selinux_android_load_policy_from_fd(int fd, const char *description)
 } 
 ```
 
+
+这个函数主要作用是设置selinux_mnt 的值为/sys/fs/selinux ,然后调用security_load_policy
+
 ### 4.5 security_load_policy
 定义在platform/external/selinux/libselinux/src/load_policy.c
 
-这个函数主要作用就是写入data到/sys/fs/selinux,data其实就是之前找的那些策略文件,由此我们知道,看起来selinux_load_policy调用这么多代码,
-其实只是将策略文件拷贝到 /sys/fs/selinux 目录下
 
 ```C
 int security_load_policy(void *data, size_t len)
@@ -854,15 +876,12 @@ int security_load_policy(void *data, size_t len)
 } 
 ```
 
+这个函数主要作用就是写入data到/sys/fs/selinux,data其实就是之前找的那些策略文件,由此我们知道,看起来selinux_load_policy调用这么多代码,
+其实只是将策略文件拷贝到 /sys/fs/selinux 目录下
+
 ### 4.6 security_setenforce
 定义在platform/external/selinux/libselinux/src/setenforce.c
 
-selinux有两种工作模式：
-
-- permissive，所有的操作都被允许（即没有MAC），但是如果违反权限的话，会记录日志,一般eng模式用
-- enforcing，所有操作都会进行权限检查。一般user和user-debug模式用
-
-不管是security_setenforce还是security_getenforce都是去操作/sys/fs/selinux/enforce 文件, 0表示permissive 1表示enforcing
 
 ```C
 int security_setenforce(int value)
@@ -890,11 +909,16 @@ int security_setenforce(int value)
 	return 0;
 } 
 ```
+selinux有两种工作模式：
+
+- permissive，所有的操作都被允许（即没有MAC），但是如果违反权限的话，会记录日志,一般eng模式用
+- enforcing，所有操作都会进行权限检查。一般user和user-debug模式用
+
+不管是security_setenforce还是security_getenforce都是去操作/sys/fs/selinux/enforce 文件, 0表示permissive 1表示enforcing
 
 
 ## 五、开始第二阶段前的准备
 
-这里主要就是设置一些变量如INIT_SECOND_STAGE,INIT_STARTED_AT,为第二阶段做准备,然后再次调用init的main函数，启动用户态的init进程
 
 ```C
 if (is_first_stage) {
@@ -917,6 +941,8 @@ if (is_first_stage) {
         security_failure();
     }
 ```
+
+这里主要就是设置一些变量如INIT_SECOND_STAGE,INIT_STARTED_AT,为第二阶段做准备,然后再次调用init的main函数，启动用户态的init进程
 
 **小结**
 
