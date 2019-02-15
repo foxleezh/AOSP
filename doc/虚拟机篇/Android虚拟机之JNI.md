@@ -279,7 +279,7 @@ env函数特别多，我这里只列举一些我们常用的
 |函数名|作用|类比Java|
 | :-- | :-- | :-- |
 |ReleaseStringUTFChars|释放String|--|
-|Release(Typge)ArrayElements|释放Type类型的数组|--|
+|Release(Type)ArrayElements|释放Type类型的数组|--|
 
 我这里只是笼统地列举了一些env函数的作用，对于参数及返回值并没有细讲，主要是这些属于API范畴的东西，要用的时候再查也不迟
 
@@ -311,9 +311,9 @@ start函数最后会调用main函数，在获取main函数时需要传递三个�
 
 |符号|Java类型|
 | :-- | :-- |
-|L/java/lang/String;|String|
+|Ljava/lang/String;|String|
 |[I|int[]|
-|[L/java/lang/object;|object[]|
+|[Ljava/lang/object;|object[]|
 
 我们回到刚才的例子 ([Ljava/lang/String;)V ，这个就表示main函数的参数是String[],返回值是void.
 
@@ -432,8 +432,7 @@ void register_dalvik_system_ZygoteHooks(JNIEnv* env) {
 
 首先Java的native方法要调用到C++函数，肯定得有个键值对作为绑定信息，也就是告诉虚拟机哪个native该执行哪个C++函数，gMethods就是这样一个角色
 
-gMethods数组的类型是JNINativeMethod，我们回顾下 JNINativeMethod ，它是一个结构体,name表示native函数名，signature表示用字符串描述native函数的参数和返回值,
-fnPtr表示native指向的C++函数指针,这其实就是动态注册的映射关系了，将native函数对应一个C++函数
+gMethods数组的类型是JNINativeMethod，我们回顾下 JNINativeMethod ，它是一个结构体
 ```C
 typedef struct {
 const char* name;
@@ -441,6 +440,10 @@ const char* signature;
 void* fnPtr;
 } JNINativeMethod;
 ```
+
+name表示native函数名，signature表示函数签名,
+fnPtr表示native指向的C++函数指针,这其实就是动态注册的映射关系了，将native函数对应一个C++函数
+
 
 但是gMethods数组中却是NATIVE_METHOD，我们看看这个NATIVE_METHOD是什么
 
@@ -450,8 +453,8 @@ void* fnPtr;
 ```
 
 如何理解这个定义呢？#define是宏定义，也就是说编译期间要做宏替换，这里就是把NATIVE_METHOD替换成
-{"","",(void*)()},具体怎么替换呢？我们看到{}里有些#、##，#表示字符串化，相当于Java中的toString，##表示字符串化拼接，相当于Java中的
-String.format,以NATIVE_METHOD(ZygoteHooks, startZygoteNoThreadCreation, "()V")为例，替换后就是
+{"","",(void*)()},具体怎么替换呢？我们看到{}里有些#、##，#表示字符串化，相当于Java中的toString，##表示参数拼接，
+也就是说拼接完还是参数，不是字符串,以NATIVE_METHOD(ZygoteHooks, startZygoteNoThreadCreation, "()V")为例，替换后就是
 {"startZygoteNoThreadCreation","()V",(void*)(ZygoteHooks_startZygoteNoThreadCreation) }
 
 

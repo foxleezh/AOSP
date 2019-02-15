@@ -419,7 +419,7 @@ bool JniInvocation::Init(const char* library) {
   // unloaded.
   const int kDlopenFlags = RTLD_NOW | RTLD_NODELETE;
   /*
-   * 1.dlopen功能是以指定模式打开指定的动态链接库文件，并返回一个句柄
+   * 1.dlopen功能是以指定模式打开指定的动态链接库文件(elf文件)，并返回一个句柄，dlopen的内容比较多，后续会单独讲elf的加载过程
    * 2.RTLD_NOW表示需要在dlopen返回前，解析出所有未定义符号，如果解析不出来，在dlopen会返回NULL
    * 3.RTLD_NODELETE表示在dlclose()期间不卸载库，并且在以后使用dlopen()重新加载库时不初始化库中的静态变量
    */
@@ -584,8 +584,22 @@ static const RegJNIRec gRegJNI[] = {
 }
 ```
 
-我们随便看一个register_com_android_internal_os_ZygoteInit,这实际上是自定义JNI函数并进行动态注册的标准写法,
+REG_JNI是一个宏定义
+```C
+    #define REG_JNI(name)      { name }
+    struct RegJNIRec {
+        int (*mProc)(JNIEnv*);
+    };
+```
+
+也就是说REG_JNI(register_com_android_internal_os_ZygoteInit)这句就相当于，{register_com_android_internal_os_ZygoteInit}，
+也就是将register_com_android_internal_os_ZygoteInit强转为 int (*mProc)(JNIEnv*) 这样一个方法指针，于是就可以array[i].mProc(env)这样调用，
+等同于调用register_com_android_internal_os_ZygoteInit(JNIEnv* env)这个方法
+
+
+再看看register_com_android_internal_os_ZygoteInit,这实际上是自定义JNI函数并进行动态注册的标准写法,
 内部是调用JNI的RegisterNatives,这样注册后，Java类ZygoteInit的native方法nativeZygoteInit就会调用com_android_internal_os_ZygoteInit_nativeZygoteInit函数
+
 ```C
 int register_com_android_internal_os_ZygoteInit(JNIEnv* env)
 {
@@ -598,7 +612,7 @@ int register_com_android_internal_os_ZygoteInit(JNIEnv* env)
 }
 ```
 
-以上便是第一部分的内容，主要工作是从libart.so提取出JNI初始函数JNI_CreateJavaVM，然后读取一些系统属性作为参数调用JNI_CreateJavaVM创建虚拟机，
+以上便是第一部分的内容，主要工作是从libart.so提取出JNI初始函数JNI_CreateJavaVM等，然后读取一些系统属性作为参数调用JNI_CreateJavaVM创建虚拟机，
 在虚拟机创建完成后，动态注册一些native函数，接下来我们讲第二部分，反射调用ZygoteInit类的main函数
 
 ### 3.2 反射调用ZygoteInit类的main函数
@@ -609,6 +623,9 @@ int register_com_android_internal_os_ZygoteInit(JNIEnv* env)
 ```C
 void AndroidRuntime::start(const char* className, const Vector<String8>& options, bool zygote)
 {
+
+    ... //省略
+    
     /*
      * We want to call main() with a String array with arguments in it.
      * At present we have two arguments, the class name and an option string.
@@ -663,7 +680,7 @@ void AndroidRuntime::start(const char* className, const Vector<String8>& options
     ALOGD("Shutting down VM\n");
     if (mJavaVM->DetachCurrentThread() != JNI_OK)//退出当前线程
         ALOGW("Warning: unable to detach main thread\n");
-    if (mJavaVM->DestroyJavaVM() != 0) //创建一个线程，该线程会等待所有子线程结束后关闭虚拟机
+    if (mJavaVM->DestroyJavaVM() != 0) //创建一个DestroyJavaVM线程，该线程会等待所有子线程结束后关闭虚拟机
         ALOGW("Warning: VM did not shut down cleanly\n");
 }
 ```

@@ -466,10 +466,12 @@ void Parser::ParseData(const std::string& filename, const std::string& data) {
 ```
 
 
-ParseData通过调用next_token函数遍历每一个字符，以空格或""为分割将一行拆分成若干个单词，调用T_TEXT将单词放到args数组中，
+ParseData通过调用next_token函数遍历每一个字符（这函数就是基本的字符解析），以空格或""为分割将一行拆分成若干个单词，调用T_TEXT将单词放到args数组中，
 当读到回车符就调用T_NEWLINE，在section_parsers_这个map中找到对应的on service import的解析器，执行ParseSection，如果在
 map中找不到对应的key，就执行ParseLineSection，当读到0的时候，表示一个Section读取结束，调用T_EOF执行EndSection.
 
+这里其实涉及到on service import对应的三个解析器ActionParser,ServiceParser,ImportParser,它们是在之前加入到section_parsers_这个map中的，
+代码如下：
 
 ```C
     Parser& parser = Parser::GetInstance();
@@ -483,7 +485,7 @@ map中找不到对应的key，就执行ParseLineSection，当读到0的时候，
     }
 ```
 
-这里其实涉及到on service import对应的三个解析器ActionParser,ServiceParser,ImportParser,它们是在之前加入到section_parsers_这个map中的
+它们都是SectionParser的子类,SectionParser有四个纯虚函数，分别是ParseSection、ParseLineSection、EndSection，EndFile.
 
 
 ```C
@@ -506,7 +508,6 @@ public:
 };
 ```
 
-它们都是SectionParser的子类,SectionParser有四个纯虚函数，分别是ParseSection、ParseLineSection、EndSection，EndFile.
 
 
 接下来我将分析这三个Perser的ParseSection、ParseLineSection、EndSection，EndFile具体实现

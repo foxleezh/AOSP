@@ -1,14 +1,24 @@
 ## 前言
+上文介绍完JNI的一些基本操作后，我们接下来讲zygote进程的下半段
 
+之前《Android系统启动流程之zygote进程(一)》中讲了zygote进程的触发、参数的解析过程以及虚拟机的创建，虚拟机创建好了，
+我们就正式进入Java环境了，也算是到了我们比较熟悉的领域
 
 本文主要讲解以下内容
 
+- 性能统计
+
+- 资源预加载
 
 
 本文涉及到的文件
 ```
 platform/frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
 ```
+
+## 一、性能统计
+
+定义在platform/frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
 
 
 ```java
