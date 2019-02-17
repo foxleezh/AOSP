@@ -61,9 +61,24 @@ main函数最开始new了一个ZygoteServer，这个后续会用到，然后设�
 这主要是担心用户创建app时，多线程情况下某些预先加载的资源没加载好，这时去调用会出问题. 接着设置了zygote进程的进程组id，
 最后便是一系列性能统计相关的动作
 
-#### 1.1 性能统计
+#### 1.1 histogram
 
-性能统计这块主要有两个
+定义在platform/frameworks/base/core/java/com/android/internal/logging/MetricsLogger.java
+
+```java
+    /** Increment the bucket with the integer label on the histogram with the given name. */
+    public void histogram(String name, int bucket) {
+        // see LogHistogram in system/core/libmetricslogger/metrics_logger.cpp
+        EventLogTags.writeSysuiHistogram(name, bucket);
+        saveLog(new LogMaker(MetricsEvent.RESERVED_FOR_LOGBUILDER_HISTOGRAM)
+                        .setCounterName(name)
+                        .setCounterBucket(bucket)
+                        .setCounterValue(1)
+                        .serialize());
+    }
+```
+
+#### 1.1 参数解析
 
 ```java
 public static void main(String argv[]) {
