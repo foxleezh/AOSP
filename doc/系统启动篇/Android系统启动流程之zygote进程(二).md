@@ -14,6 +14,14 @@
 本文涉及到的文件
 ```
 platform/frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
+platform/frameworks/base/core/java/com/android/internal/logging/MetricsLogger.java
+platform/frameworks/base/core/java/com/android/internal/logging/EventLogTags.logtags
+platform/system/core/logcat/event.logtags
+platform/build/tools/java-event-log-tags.py
+platform/frameworks/base/core/jni/android_util_EventLog.cpp
+platform/frameworks/base/core/java/android/os/Trace.java
+platform/frameworks/base/core/jni/android_os_Trace.cpp
+platform/system/core/libcutils/trace-dev.c
 ```
 
 ## 一、性能统计
@@ -106,7 +114,7 @@ option java_package com.android.internal.logging;
 ```
 
 他说对于这个脚本的描述在system/core/logcat/event.logtags
-我们找下platform/frameworks/system/core/logcat/event.logtags
+我们找下platform/system/core/logcat/event.logtags
 
 
 ```text
@@ -248,7 +256,7 @@ public class EventLogTags{
 ```
 
 所以EventLogTags.writeSysuiHistogram最终是调用了EventLog.writeEvent函数，这个函数是一个native函数，它的实现在
-platform/base/core/jni/android_util_EventLog.cpp
+platform/frameworks/base/core/jni/android_util_EventLog.cpp
 
 #### 1.1.3 android_util_EventLog
 
@@ -321,9 +329,154 @@ writeEvent有许多函数，但是基本都是向ctx里面拼接字符，然后�
   }
 ```
 
-android_log_write_list函数就是去输出日志了，里面也写得比较复杂，不过主要作用就是输出到logcat
+android_log_write_list里面写得比较复杂，因为这涉及到日志系统的处理流程，后续再专门拿一篇文章来讲，
+android_log_write_list函数并不会直接输出日志，只是把要输出的日志内容加入到一个链表中，而日志系统会循环这个链表，最终输出
 
-到这里，我们就理清了事件日志记录的全过程，主要是有一个脚本转化的过程，以后所以以.logtags结尾的文件都可以这样理解了
+到这里，我们就理清了事件日志记录的全过程，主要是有一个脚本转化的过程，以后所有以.logtags结尾的文件都可以这样理解了
+
+
+#### 1.2.1 traceBegin
+
+定义在platform/frameworks/base/core/java/android/os/Trace.java
+
+```java
+
+
+
+    public static void traceBegin(long traceTag, String methodName) {
+        if (isTagEnabled(traceTag)) {
+            nativeTraceBegin(traceTag, methodName);
+        }
+    }
+    
+    public static boolean isTagEnabled(long traceTag) {
+        long tags = sEnabledTags;
+        if (tags == TRACE_TAG_NOT_READY) {
+            tags = cacheEnabledTags();
+        }
+        return (tags & traceTag) != 0;
+    }
+     
+    @FastNative
+    private static native void nativeTraceBegin(long tag, String name);
+
+```
+
+traceBegin先判断了下一个状态值sEnabledTags，如果满足条件就调用nativeTraceBegin
+
+#### 1.2.2 nativeTraceBegin
+
+定义在platform/frameworks/base/core/jni/android_os_Trace.cpp
+
+```C++
+static const JNINativeMethod gTraceMethods[] = {
+
+    // ----------- @FastNative  ----------------
+    { "nativeTraceBegin",
+            "(JLjava/lang/String;)V",
+            (void*)android_os_Trace_nativeTraceBegin },
+    { "nativeTraceEnd",
+            "(J)V",
+            (void*)android_os_Trace_nativeTraceEnd },
+};
+```
+
+这里提一下@FastNative这个注解，这是ART 8.0增加的，可以提升JNI调用速度，参考https://blog.csdn.net/zhangbijun1230/article/details/80562747
+nativeTraceBegin对应的函数是android_os_Trace_nativeTraceBegin
+
+```C++
+static void android_os_Trace_nativeTraceBegin(JNIEnv* env, jclass clazz,
+        jlong tag, jstring nameStr) {
+    ScopedStringChars jchars(env, nameStr); //对String的封装
+    String8 utf8Chars(reinterpret_cast<const char16_t*>(jchars.get()), jchars.size());//也是对String的封装
+    sanitizeString(utf8Chars);//将 /0, 回车，| 转为空格
+
+    ALOGV("%s: %" PRId64 " %s", __FUNCTION__, tag, utf8Chars.string());
+    atrace_begin(tag, utf8Chars.string());
+}
+```
+
+这里是将传进来和参数转为C里面封装的String，然后将 /0, 回车，| 转为空格，输出一段日志后就调用atrace_begin
+这里稍微讲一下C中如何寻找一些函数的定义，比如这里的atrace_begin函数并不在该源文件中，怎样快速找到对应的实现
+
+首先Souce Insight导入文件时，尽量把一个文件夹一起导入，因为相关的源码都基本放在同一个文件夹下，这样就可以迅速找到
+但是有时源码之间相差很远，这时我们就要观察include，看哪个比较像
+
+```C++
+#include <inttypes.h>
+
+#include <cutils/trace.h>
+#include <utils/String8.h>
+#include <log/log.h>
+
+#include <JNIHelp.h>
+#include <ScopedUtfChars.h>
+#include <ScopedStringChars.h>
+```
+该源文件中就这几个头文件，一看就知道应该是cutils/trace.h，所以就去对应目录platform/system/core/xxx找，基本就可以找到
+另外再推荐一个Windows的搜索工具Everything，比如你找不到trace.h,直接搜索就能找到
+
+```C
+static inline void atrace_begin(uint64_t tag, const char* name)
+{
+    if (CC_UNLIKELY(atrace_is_tag_enabled(tag))) {
+        void atrace_begin_body(const char*);
+        atrace_begin_body(name);
+    }
+}
+```
+
+一般来讲头文件只做函数声明，不做代码实现，这里似乎实现了代码，其实并没有，这个函数是inline函数，本身会被消除掉，
+也就是说在编译后，会把调用这个函数的地方替换为方法体中的代码，CC_UNLIKELY主要是做代码优化的，本身没有什么逻辑，
+我们主要看下atrace_begin_body，这里就涉及到寻找.h的实现类
+
+头文件的实现类xx.c，xx.cpp基本也就在对应的目录下，名字也不会差太远，
+另外可以观察目录下的Android.mk或者Android.bp这些编译文件，里面会写包含了哪些源文件
+```text
+        android: {
+            srcs: libcutils_nonwindows_sources + [
+                "android_reboot.c",
+                "ashmem-dev.c",
+                "klog.cpp",
+                "partition_utils.c",
+                "properties.cpp",
+                "qtaguid.c",
+                "trace-dev.c",
+                "uevent.c",
+            ],
+            sanitize: {
+                misc_undefined: ["integer"],
+            },
+        },
+```
+
+trace.h的实现类叫trace-dev.c,定义在platform/system/core/libcutils/trace-dev.c
+
+
+#### 1.2.3 atrace_begin_body
+
+定义在platform/system/core/libcutils/trace-dev.c
+
+```C++
+void atrace_begin_body(const char* name)
+{
+    char buf[ATRACE_MESSAGE_LENGTH];
+
+    int len = snprintf(buf, sizeof(buf), "B|%d|%s", getpid(), name); //拼接pid
+    if (len >= (int) sizeof(buf)) {
+        ALOGW("Truncated name in %s: %s\n", __FUNCTION__, name);
+        len = sizeof(buf) - 1;
+    }
+    write(atrace_marker_fd, buf, len);//写入trace_marker文件
+}
+
+
+atrace_marker_fd = open("/sys/kernel/debug/tracing/trace_marker", O_WRONLY | O_CLOEXEC);
+
+```
+
+这就是最终干活的地方了，将pid拼接一下，将拼接的结果写入文件/sys/kernel/debug/tracing/trace_marker
+
 
 #### 1.1 参数解析
 
