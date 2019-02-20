@@ -55,7 +55,7 @@ public static void main(String argv[]) {
             BootTimingsTraceLog bootTimingsTraceLog = new BootTimingsTraceLog(bootTimeTag,
                     Trace.TRACE_TAG_DALVIK);
             bootTimingsTraceLog.traceBegin("ZygoteInit"); //跟踪调试ZygoteInit
-            RuntimeInit.enableDdms(); //开启DDMS
+            RuntimeInit.enableDdms(); //注册DDms的处理类
             // Start profiling the zygote initialization.
             SamplingProfilerIntegration.start(); //开始性能统计
             ...
@@ -477,6 +477,50 @@ atrace_marker_fd = open("/sys/kernel/debug/tracing/trace_marker", O_WRONLY | O_C
 
 这就是最终干活的地方了，将pid拼接一下，将拼接的结果写入文件/sys/kernel/debug/tracing/trace_marker
 
+### 1.3 enableDdms
+
+```java
+
+    static final void enableDdms() {
+        // Register handlers for DDM messages.
+        android.ddm.DdmRegister.registerHandlers();
+    }
+
+    public static void registerHandlers() {
+        if (false)
+            Log.v("ddm", "Registering DDM message handlers");
+        DdmHandleHello.register();
+        DdmHandleThread.register();
+        DdmHandleHeap.register();
+        DdmHandleNativeHeap.register();
+        DdmHandleProfiling.register();
+        DdmHandleExit.register();
+        DdmHandleViewDebug.register();
+
+        DdmServer.registrationComplete();
+    }
+    
+    public static void register() {
+        DdmServer.registerHandler(CHUNK_THEN, mInstance);
+        DdmServer.registerHandler(CHUNK_THST, mInstance);
+        DdmServer.registerHandler(CHUNK_STKL, mInstance);
+    }
+    
+    public static void registerHandler(int type, ChunkHandler handler) {
+        if (handler == null) {
+            throw new NullPointerException("handler == null");
+        }
+        synchronized (mHandlerMap) {
+            if (mHandlerMap.get(type) != null)
+                throw new RuntimeException("type " + Integer.toHexString(type)
+                    + " already registered");
+
+            mHandlerMap.put(type, handler);
+        }
+    }    
+```
+
+这个比较简单，就是重复调用registerHandler函数，将一个int值（key）和一个处理类（value）放入HashMap一一映射起来
 
 #### 1.1 参数解析
 
